@@ -1,19 +1,52 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
 :root {
   font-family: 'IBM Plex Sans', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #f4fff8;
-  background: #071411;
+  color: #ece8df;
+  background: #151614;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  --text-main: #effff5;
-  --text-muted: rgba(230, 245, 236, 0.7);
-  --accent-soft: #d6ff72;
+  --text-main: #efebe3;
+  --text-muted: rgba(217, 211, 197, 0.62);
+  --accent-soft: #c8a16e;
+  --accent-bright: #d7bc92;
+  --panel-surface: rgba(45, 44, 41, 0.92);
+  --panel-surface-strong: rgba(56, 54, 50, 0.96);
+  --panel-overlay: rgba(16, 17, 16, 0.32);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --panel-border-strong: rgba(208, 168, 109, 0.2);
+  --panel-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+  --glass-surface: var(--panel-surface);
+  --glass-overlay: var(--panel-overlay);
+  --glass-border: var(--panel-border);
+  --glass-border-strong: var(--panel-border-strong);
+  --glass-shadow: var(--panel-shadow);
+  --glass-blur: blur(18px) saturate(110%);
+  /* Map floating controls — neutral glass (https://css.glass) */
+  --map-glass-bg: rgba(26, 26, 26, 0.24);
+  --map-glass-bg-hover: rgba(26, 26, 26, 0.34);
+  --map-glass-blur: blur(5.3px);
+  --map-glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  --map-glass-radius: 16px;
+
+  /* Flat sidebar surfaces (no gradients / glass) */
+  --sidebar-bg: #1f1f1d;
+  --sidebar-surface: #292826;
+  --sidebar-control: #232321;
+  --sidebar-control-active: #3f3d39;
+  --sidebar-border: rgba(255, 255, 255, 0.09);
+  --sidebar-border-strong: rgba(208, 168, 109, 0.22);
+  --sidebar-primary: #6e6a63;
+  --sidebar-primary-hover: #7f7a73;
+  --sidebar-primary-text: #f4efe7;
+  --sidebar-primary-border: rgba(232, 222, 205, 0.12);
+  --sidebar-radius: 0.25rem;
+  --sidebar-radius-inner: 0.125rem;
 }
 
 * {
@@ -29,6 +62,7 @@ body,
 body {
   margin: 0;
   overflow: hidden;
+  background: #141516;
 }
 
 button,
@@ -41,9 +75,9 @@ select {
 h1,
 h2,
 h3 {
-  font-family: 'Space Grotesk', sans-serif;
+  font-family: 'Manrope', sans-serif;
   color: var(--text-main);
-  letter-spacing: -0.03em;
+  letter-spacing: -0.035em;
 }
 
 p {
