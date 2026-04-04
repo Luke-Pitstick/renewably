@@ -1,7 +1,0 @@
-{
-  "error": {
-    "code": 500,
-    "message": "Unable to compute table: java.io.IOException: No space left on device",
-    "status": "INTERNAL"
-  }
-}
