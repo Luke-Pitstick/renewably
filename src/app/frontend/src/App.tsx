@@ -11,11 +11,10 @@ type BoundingBox = {
   ymax: number
 }
 
-const stateHighlights = [
-  { state: 'California', mix: 'Solar heavy', intensity: '182 gCO2eq/kWh' },
-  { state: 'Texas', mix: 'Wind + gas', intensity: '356 gCO2eq/kWh' },
-  { state: 'Iowa', mix: 'Wind surplus', intensity: '128 gCO2eq/kWh' },
-]
+type LocationSearchRequest = {
+  id: number
+  query: string
+}
 
 function App() {
   const [solarVisible, setSolarVisible] = useState(true)
@@ -26,13 +25,17 @@ function App() {
   const [boundingBoxSelectionActive, setBoundingBoxSelectionActive] =
     useState(false)
   const [boundingBox, setBoundingBox] = useState<BoundingBox | null>(null)
+  const [locationQuery, setLocationQuery] = useState('')
+  const [locationSearchRequest, setLocationSearchRequest] =
+    useState<LocationSearchRequest | null>(null)
   const activeLayerCount = Number(solarVisible) + Number(windVisible)
   const inputLabel =
     optimizationMode === 'cash' ? 'Target power need' : 'Available budget'
   const inputPlaceholder =
-    optimizationMode === 'cash' ? 'Enter required power in kWh' : 'Enter max budget in USD'
+    optimizationMode === 'cash' ? 'Enter required power' : 'Enter max budget'
+  const inputUnit = optimizationMode === 'cash' ? 'kWh' : 'USD'
   const boundingBoxSummary = boundingBox
-    ? `${boundingBox.xmin.toFixed(1)}, ${boundingBox.ymin.toFixed(1)} to ${boundingBox.xmax.toFixed(1)}, ${boundingBox.ymax.toFixed(1)}`
+    ? 'Area selected on map'
     : 'No area selected'
 
   return (
@@ -47,6 +50,42 @@ function App() {
             <h1>Grid intelligence</h1>
           </div>
         </div>
+
+        <section className="sidebar-panel">
+          <div className="sidebar-panel-header">
+            <p className="panel-label">Location search</p>
+            <span className="badge">Map</span>
+          </div>
+
+          <label className="input-block">
+            <span>Search location</span>
+            <div className="search-row">
+              <input
+                type="text"
+                value={locationQuery}
+                onChange={(event) => setLocationQuery(event.target.value)}
+                placeholder="Enter a city, state, or address"
+              />
+              <button
+                type="button"
+                className="search-button"
+                onClick={() => {
+                  const query = locationQuery.trim()
+                  if (!query) {
+                    return
+                  }
+
+                  setLocationSearchRequest({
+                    id: Date.now(),
+                    query,
+                  })
+                }}
+              >
+                Search
+              </button>
+            </div>
+          </label>
+        </section>
 
         <section className="sidebar-panel">
           <div className="sidebar-panel-header">
@@ -73,16 +112,22 @@ function App() {
 
           <label className="input-block">
             <span>{inputLabel}</span>
-            <input
-              type="text"
-              value={optimizationValue}
-              onChange={(event) => setOptimizationValue(event.target.value)}
-              placeholder={inputPlaceholder}
-            />
+            <div className="input-row">
+              <input
+                type="text"
+                value={optimizationValue}
+                onChange={(event) => setOptimizationValue(event.target.value)}
+                placeholder={inputPlaceholder}
+              />
+              <span className="input-unit">{inputUnit}</span>
+            </div>
           </label>
 
           <div className="selection-summary">
-            <span className="panel-label">Bounding box</span>
+            <span className="panel-label">Selected bounds</span>
+            <p className="selection-hint">
+              Click points on the map to draw an area, then double-click your final point to finish.
+            </p>
             <strong>{boundingBoxSummary}</strong>
           </div>
 
@@ -96,7 +141,7 @@ function App() {
                 setBoundingBoxSelectionActive((current) => !current)
               }
             >
-              {boundingBoxSelectionActive ? 'Cancel bounding box' : 'Place bounding box'}
+              {boundingBoxSelectionActive ? 'Cancel area drawing' : 'Draw selection area'}
             </button>
             <button type="button" className="sidebar-submit">
               Submit optimization request
@@ -132,40 +177,6 @@ function App() {
             />
           </label>
         </section>
-
-        <section className="sidebar-panel">
-          <p className="panel-label">National overview</p>
-          <div className="panel-stat">
-            <span>Renewable share</span>
-            <strong>43.8%</strong>
-          </div>
-          <div className="panel-stat">
-            <span>Demand served</span>
-            <strong>512 GW</strong>
-          </div>
-          <div className="panel-stat">
-            <span>Storage dispatch</span>
-            <strong>61 GW</strong>
-          </div>
-        </section>
-
-        <section className="sidebar-panel">
-          <div className="sidebar-panel-header">
-            <p className="panel-label">State snapshots</p>
-            <span className="badge">Live</span>
-          </div>
-          <div className="state-list">
-            {stateHighlights.map((item) => (
-              <article key={item.state} className="state-card">
-                <div>
-                  <h2>{item.state}</h2>
-                  <p>{item.mix}</p>
-                </div>
-                <strong>{item.intensity}</strong>
-              </article>
-            ))}
-          </div>
-        </section>
       </aside>
 
       <section className="map-stage">
@@ -176,6 +187,7 @@ function App() {
             boundingBoxSelectionActive={boundingBoxSelectionActive}
             onBoundingBoxSelectionChange={setBoundingBoxSelectionActive}
             onBoundingBoxSelect={setBoundingBox}
+            locationSearchRequest={locationSearchRequest}
           />
 
           {solarVisible ? (

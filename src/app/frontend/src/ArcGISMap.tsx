@@ -4,6 +4,10 @@ type ArcGISMapProps = {
   solarVisible: boolean
   windVisible: boolean
   boundingBoxSelectionActive: boolean
+  locationSearchRequest: {
+    id: number
+    query: string
+  } | null
   onBoundingBoxSelectionChange: (active: boolean) => void
   onBoundingBoxSelect: (boundingBox: {
     xmin: number
@@ -36,7 +40,7 @@ type SketchHandle = {
 type ViewHandle = {
   destroy: () => void
   zoom: number
-  goTo: (target: { zoom: number }, options?: { animate?: boolean }) => Promise<unknown>
+  goTo: (target: unknown, options?: { animate?: boolean }) => Promise<unknown>
 }
 
 declare global {
@@ -76,6 +80,7 @@ export function ArcGISMap({
   solarVisible,
   windVisible,
   boundingBoxSelectionActive,
+  locationSearchRequest,
   onBoundingBoxSelectionChange,
   onBoundingBoxSelect,
 }: ArcGISMapProps) {
@@ -423,12 +428,76 @@ export function ArcGISMap({
     if (boundingBoxSelectionActive) {
       graphicsLayerRef.current.removeAll()
       sketchViewModelRef.current.cancel()
-      sketchViewModelRef.current.create('rectangle')
+      sketchViewModelRef.current.create('polygon')
       return
     }
 
     sketchViewModelRef.current.cancel()
   }, [boundingBoxSelectionActive])
+
+  useEffect(() => {
+    if (!locationSearchRequest || !viewRef.current || !window.require) {
+      return
+    }
+
+    window.require(
+      ['esri/rest/locator'],
+      (...loaded: unknown[]) => {
+        const [locator] = loaded as [
+          {
+            addressToLocations: (url: string, params: { address: { SingleLine: string } }) => Promise<
+              Array<{
+                location?: {
+                  longitude: number
+                  latitude: number
+                }
+                extent?: {
+                  xmin: number
+                  ymin: number
+                  xmax: number
+                  ymax: number
+                }
+              }>
+            >
+          },
+        ]
+
+        locator
+          .addressToLocations('https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer', {
+            address: {
+              SingleLine: locationSearchRequest.query,
+            },
+          })
+          .then((results) => {
+            const firstResult = results[0]
+            if (!firstResult || !viewRef.current) {
+              return
+            }
+
+            if (firstResult.extent) {
+              viewRef.current.goTo(firstResult.extent, { animate: true }).catch(() => {})
+              return
+            }
+
+            const point = firstResult.location
+            if (!point) {
+              return
+            }
+
+            viewRef.current
+              .goTo(
+                {
+                  center: [point.longitude, point.latitude],
+                  zoom: 9,
+                },
+                { animate: true },
+              )
+              .catch(() => {})
+          })
+          .catch(() => {})
+      },
+    )
+  }, [locationSearchRequest])
 
   return (
     <>
