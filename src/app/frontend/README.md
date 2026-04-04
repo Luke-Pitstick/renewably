@@ -1,5 +1,18 @@
 # React + TypeScript + Vite
 
+## Deploy on Render
+
+This app can be deployed on Render as a `Static Site`.
+
+If you create the service manually in the Render dashboard, use:
+
+- Branch: `main`
+- Root Directory: `src/app/frontend`
+- Build Command: `npm run build`
+- Publish Directory: `dist`
+
+This repo also includes a Blueprint file at `src/app/frontend/render.yaml`. Render Blueprints default to looking for `render.yaml` in the repository root, so during Blueprint setup you need to select this custom path or move the file to the repo root later.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
