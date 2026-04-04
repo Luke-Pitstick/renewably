@@ -1,0 +1,84 @@
+- main [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: R
+      - generic [ref=e7]:
+        - paragraph [ref=e8]: Renewably
+        - heading "Grid intelligence" [level=1] [ref=e9]
+    - generic [ref=e10]:
+      - button "Location search Map" [expanded] [ref=e11] [cursor=pointer]:
+        - generic [ref=e12]:
+          - paragraph [ref=e13]: Location search
+          - generic [ref=e14]: Map
+      - generic [ref=e17]:
+        - generic [ref=e18]: Search location
+        - generic [ref=e19]:
+          - textbox "Search location Search" [ref=e20]:
+            - /placeholder: Enter a city, state, or address
+          - button "Search" [ref=e21] [cursor=pointer]
+    - generic [ref=e22]:
+      - button "Optimization Draft" [expanded] [ref=e23] [cursor=pointer]:
+        - generic [ref=e24]:
+          - paragraph [ref=e25]: Optimization
+          - generic [ref=e26]: Draft
+      - generic [ref=e28]:
+        - tablist "Optimization mode" [ref=e29]:
+          - button "Cash optimization" [ref=e30] [cursor=pointer]
+          - button "Power optimization" [ref=e31] [cursor=pointer]
+        - generic [ref=e32]:
+          - generic [ref=e33]: Target power need
+          - generic [ref=e34]:
+            - textbox "Target power need kWh" [ref=e35]:
+              - /placeholder: Enter required power
+            - generic [ref=e36]: kWh
+        - generic [ref=e37]:
+          - generic [ref=e38]: Selected bounds
+          - paragraph [ref=e39]: Click points on the map to draw an area, then double-click your final point to finish.
+          - strong [ref=e40]: No area selected
+        - generic [ref=e41]:
+          - button "Draw selection area" [ref=e42] [cursor=pointer]
+          - button "Submit optimization request" [ref=e43] [cursor=pointer]
+    - generic [ref=e44]:
+      - button "Map layers 2 active" [expanded] [ref=e45] [cursor=pointer]:
+        - generic [ref=e46]:
+          - paragraph [ref=e47]: Map layers
+          - generic [ref=e48]: 2 active
+      - generic [ref=e50]:
+        - generic [ref=e51]:
+          - generic [ref=e52]:
+            - strong [ref=e53]: Solar irradiation
+            - paragraph [ref=e54]: Heatmap from annual solar averages
+          - checkbox "Solar irradiation Heatmap from annual solar averages" [checked] [ref=e55]
+        - generic [ref=e56]:
+          - generic [ref=e57]:
+            - strong [ref=e58]: Wind speed
+            - paragraph [ref=e59]: Point layer from annual wind speed data
+          - checkbox "Wind speed Point layer from annual wind speed data" [checked] [ref=e60]
+  - generic [ref=e62]:
+    - generic "United States map" [ref=e63]:
+      - application [ref=e65]
+    - generic "Map zoom controls" [ref=e66]:
+      - button "+" [ref=e67] [cursor=pointer]
+      - button "-" [ref=e68] [cursor=pointer]
+    - generic [ref=e69]:
+      - paragraph [ref=e70]: Solar irradiation
+      - generic [ref=e72]:
+        - generic [ref=e73]: Lower resource
+        - generic [ref=e74]: Strong resource
+        - generic [ref=e75]: Peak resource
+    - generic [ref=e76]:
+      - paragraph [ref=e77]: Wind speed
+      - generic [ref=e79]:
+        - generic [ref=e80]: Lower wind
+        - generic [ref=e81]: Strong wind
+        - generic [ref=e82]: Peak wind
+    - generic [ref=e83]:
+      - generic [ref=e84]:
+        - text: Best solar
+        - strong [ref=e85]: AZ · NV · NM
+      - generic [ref=e86]:
+        - text: Best wind
+        - strong [ref=e87]: TX · IA · OK
+      - generic [ref=e88]:
+        - text: Grid stress
+        - strong [ref=e89]: Southeast

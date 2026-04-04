@@ -1288,6 +1288,58 @@ export const ArcGISMap = memo(function ArcGISMap({
   }, [boundingBoxSelectionActive])
 
   useEffect(() => {
+    if (!editSelectionRequest || !selectionGraphicRef.current) {
+      return
+    }
+
+    beginSelectionEdit()
+  }, [editSelectionRequest])
+
+  useEffect(() => {
+    if (boundingBox !== null) {
+      return
+    }
+
+    sketchViewModelRef.current?.cancel()
+    graphicsLayerRef.current?.removeAll()
+    selectionGraphicRef.current = null
+  }, [boundingBox])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!selectionGraphicRef.current) {
+        return
+      }
+
+      if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return
+      }
+
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      sketchViewModelRef.current?.cancel()
+      graphicsLayerRef.current?.removeAll()
+      selectionGraphicRef.current = null
+      onBoundingBoxSelectionChange(false)
+      onBoundingBoxSelect(null)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onBoundingBoxSelect, onBoundingBoxSelectionChange])
+
+  useEffect(() => {
     if (!locationSearchRequest || !viewRef.current) {
       return
     }
