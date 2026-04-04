@@ -3,5 +3,5 @@ services:
     name: renewably-frontend
     runtime: static
     rootDir: src/app/frontend
-    buildCommand: npm run build
+    buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: dist
