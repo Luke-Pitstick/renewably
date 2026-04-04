@@ -2,12 +2,14 @@ import { useState } from 'react'
 import './App.css'
 import { ArcGISMap } from './ArcGISMap'
 
-const menuItems = [
-  { label: 'Live map', value: 'Map' },
-  { label: 'Generation', value: 'Output' },
-  { label: 'Forecasts', value: 'Forecast' },
-  { label: 'Projects', value: 'Pipeline' },
-]
+type OptimizationMode = 'cash' | 'power'
+
+type BoundingBox = {
+  xmin: number
+  ymin: number
+  xmax: number
+  ymax: number
+}
 
 const stateHighlights = [
   { state: 'California', mix: 'Solar heavy', intensity: '182 gCO2eq/kWh' },
@@ -16,10 +18,22 @@ const stateHighlights = [
 ]
 
 function App() {
-  const [activeMenu, setActiveMenu] = useState('Map')
   const [solarVisible, setSolarVisible] = useState(true)
   const [windVisible, setWindVisible] = useState(true)
+  const [optimizationMode, setOptimizationMode] =
+    useState<OptimizationMode>('cash')
+  const [optimizationValue, setOptimizationValue] = useState('')
+  const [boundingBoxSelectionActive, setBoundingBoxSelectionActive] =
+    useState(false)
+  const [boundingBox, setBoundingBox] = useState<BoundingBox | null>(null)
   const activeLayerCount = Number(solarVisible) + Number(windVisible)
+  const inputLabel =
+    optimizationMode === 'cash' ? 'Target power need' : 'Available budget'
+  const inputPlaceholder =
+    optimizationMode === 'cash' ? 'Enter required power in kWh' : 'Enter max budget in USD'
+  const boundingBoxSummary = boundingBox
+    ? `${boundingBox.xmin.toFixed(1)}, ${boundingBox.ymin.toFixed(1)} to ${boundingBox.xmax.toFixed(1)}, ${boundingBox.ymax.toFixed(1)}`
+    : 'No area selected'
 
   return (
     <main className="app-shell">
@@ -34,19 +48,61 @@ function App() {
           </div>
         </div>
 
-        <nav className="menu" aria-label="Primary">
-          {menuItems.map((item) => (
+        <section className="sidebar-panel">
+          <div className="sidebar-panel-header">
+            <p className="panel-label">Optimization</p>
+            <span className="badge">Draft</span>
+          </div>
+
+          <div className="mode-switch" role="tablist" aria-label="Optimization mode">
             <button
-              key={item.value}
               type="button"
-              className={item.value === activeMenu ? 'menu-item active' : 'menu-item'}
-              onClick={() => setActiveMenu(item.value)}
+              className={optimizationMode === 'cash' ? 'mode-button active' : 'mode-button'}
+              onClick={() => setOptimizationMode('cash')}
             >
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
+              Cash optimization
             </button>
-          ))}
-        </nav>
+            <button
+              type="button"
+              className={optimizationMode === 'power' ? 'mode-button active' : 'mode-button'}
+              onClick={() => setOptimizationMode('power')}
+            >
+              Power optimization
+            </button>
+          </div>
+
+          <label className="input-block">
+            <span>{inputLabel}</span>
+            <input
+              type="text"
+              value={optimizationValue}
+              onChange={(event) => setOptimizationValue(event.target.value)}
+              placeholder={inputPlaceholder}
+            />
+          </label>
+
+          <div className="selection-summary">
+            <span className="panel-label">Bounding box</span>
+            <strong>{boundingBoxSummary}</strong>
+          </div>
+
+          <div className="action-stack">
+            <button
+              type="button"
+              className={
+                boundingBoxSelectionActive ? 'sidebar-action active' : 'sidebar-action'
+              }
+              onClick={() =>
+                setBoundingBoxSelectionActive((current) => !current)
+              }
+            >
+              {boundingBoxSelectionActive ? 'Cancel bounding box' : 'Place bounding box'}
+            </button>
+            <button type="button" className="sidebar-submit">
+              Submit optimization request
+            </button>
+          </div>
+        </section>
 
         <section className="sidebar-panel">
           <div className="sidebar-panel-header">
@@ -114,26 +170,25 @@ function App() {
 
       <section className="map-stage">
         <div className="map-frame">
-          <ArcGISMap solarVisible={solarVisible} windVisible={windVisible} />
+          <ArcGISMap
+            solarVisible={solarVisible}
+            windVisible={windVisible}
+            boundingBoxSelectionActive={boundingBoxSelectionActive}
+            onBoundingBoxSelectionChange={setBoundingBoxSelectionActive}
+            onBoundingBoxSelect={setBoundingBox}
+          />
 
-          <div className="map-overlay overlay-left">
-            <p className="panel-label">Solar irradiation</p>
-            <div className="legend-bar" aria-hidden="true" />
-            <div className="legend-values">
-              <span>Lower resource</span>
-              <span>Strong resource</span>
-              <span>Peak resource</span>
+          {solarVisible ? (
+            <div className="map-overlay overlay-left">
+              <p className="panel-label">Solar irradiation</p>
+              <div className="legend-bar" aria-hidden="true" />
+              <div className="legend-values">
+                <span>Lower resource</span>
+                <span>Strong resource</span>
+                <span>Peak resource</span>
+              </div>
             </div>
-          </div>
-
-          <div className="map-overlay overlay-right">
-            <p className="panel-label">Recommended focus</p>
-            <h3>Southwest solar corridor</h3>
-            <p>
-              Strong irradiance, low winter volatility, and large utility-scale
-              siting opportunities.
-            </p>
-          </div>
+          ) : null}
 
           <div className="map-overlay overlay-bottom">
             <div className="metric-chip">

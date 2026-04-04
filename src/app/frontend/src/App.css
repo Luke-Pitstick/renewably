@@ -1,7 +1,8 @@
 .app-shell {
-  min-height: 100svh;
+  height: 100svh;
   display: grid;
   grid-template-columns: 360px minmax(0, 1fr);
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(158, 255, 109, 0.14), transparent 22%),
     linear-gradient(135deg, #071411 0%, #0b1c18 30%, #102925 100%);
@@ -11,6 +12,8 @@
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  height: 100svh;
+  overflow-y: auto;
   padding: 1.5rem;
   background:
     linear-gradient(180deg, rgba(4, 10, 9, 0.92), rgba(7, 16, 14, 0.88)),
@@ -50,48 +53,6 @@
 .state-card h2,
 .map-overlay h3 {
   margin: 0;
-}
-
-.menu {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  width: 100%;
-  padding: 0.95rem 1rem;
-  border: 1px solid rgba(196, 244, 215, 0.1);
-  border-radius: 1.15rem;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-main);
-  cursor: pointer;
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease,
-    background 180ms ease;
-}
-
-.menu-item span {
-  color: var(--text-muted);
-  font-size: 0.92rem;
-}
-
-.menu-item strong {
-  font-size: 0.96rem;
-  font-weight: 600;
-}
-
-.menu-item:hover,
-.menu-item:focus-visible,
-.menu-item.active {
-  transform: translateX(4px);
-  border-color: rgba(214, 255, 114, 0.34);
-  background: linear-gradient(135deg, rgba(214, 255, 114, 0.14), rgba(79, 214, 162, 0.1));
-  outline: none;
 }
 
 .sidebar-panel,
@@ -165,6 +126,127 @@
   accent-color: #d6ff72;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.mode-button,
+.sidebar-action,
+.sidebar-submit {
+  width: 100%;
+  border-radius: 1rem;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.mode-button {
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(196, 244, 215, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+}
+
+.mode-button.active,
+.mode-button:hover,
+.mode-button:focus-visible {
+  background: linear-gradient(135deg, rgba(214, 255, 114, 0.14), rgba(79, 214, 162, 0.1));
+  border-color: rgba(214, 255, 114, 0.34);
+  color: var(--text-main);
+  outline: none;
+}
+
+.input-block {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.input-block span {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.input-block input {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(196, 244, 215, 0.12);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+}
+
+.input-block input::placeholder {
+  color: rgba(230, 245, 236, 0.45);
+}
+
+.input-block input:focus {
+  outline: 1px solid rgba(214, 255, 114, 0.42);
+  border-color: rgba(214, 255, 114, 0.34);
+}
+
+.selection-summary {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.selection-summary .panel-label {
+  margin-bottom: 0;
+}
+
+.selection-summary strong {
+  color: var(--text-main);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.action-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.sidebar-action,
+.sidebar-submit {
+  padding: 0.92rem 1rem;
+}
+
+.sidebar-action {
+  border: 1px solid rgba(196, 244, 215, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+}
+
+.sidebar-action.active,
+.sidebar-action:hover,
+.sidebar-action:focus-visible {
+  background: rgba(214, 255, 114, 0.12);
+  border-color: rgba(214, 255, 114, 0.34);
+  outline: none;
+}
+
+.sidebar-submit {
+  border: 1px solid rgba(214, 255, 114, 0.25);
+  background: linear-gradient(135deg, #d6ff72, #80e8b8);
+  color: #09201a;
+  font-weight: 700;
+}
+
+.sidebar-submit:hover,
+.sidebar-submit:focus-visible {
+  transform: translateY(-1px);
+  outline: none;
+}
+
 .panel-stat:first-of-type {
   border-top: 0;
   padding-top: 0;
@@ -206,13 +288,15 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  height: 100svh;
   padding: 1.25rem;
 }
 
 .map-frame {
   position: relative;
   flex: 1;
-  min-height: 620px;
+  height: 100%;
+  min-height: 0;
   border-radius: 1.8rem;
   overflow: hidden;
   border: 1px solid rgba(196, 244, 215, 0.12);
@@ -224,6 +308,41 @@
   inset: 0;
 }
 
+.map-zoom-controls {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: grid;
+  gap: 0.45rem;
+  z-index: 2;
+}
+
+.zoom-button {
+  width: 2.9rem;
+  height: 2.9rem;
+  border: 1px solid rgba(196, 244, 215, 0.16);
+  border-radius: 1rem;
+  background: rgba(6, 17, 14, 0.82);
+  color: var(--text-main);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease;
+}
+
+.zoom-button:hover,
+.zoom-button:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(214, 255, 114, 0.34);
+  background: rgba(14, 31, 26, 0.92);
+  outline: none;
+}
+
 .map-overlay {
   position: absolute;
   padding: 1rem 1.1rem;
@@ -233,12 +352,6 @@
 .overlay-left {
   top: 1rem;
   left: 1rem;
-  width: min(320px, calc(100% - 2rem));
-}
-
-.overlay-right {
-  top: 1rem;
-  right: 1rem;
   width: min(320px, calc(100% - 2rem));
 }
 
@@ -284,16 +397,26 @@
 
 @media (max-width: 1080px) {
   .app-shell {
+    height: auto;
+    min-height: 100svh;
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .sidebar {
+    height: auto;
+    overflow: visible;
     border-right: 0;
     border-bottom: 1px solid rgba(196, 244, 215, 0.12);
   }
 
   .map-stage {
+    height: auto;
     padding-top: 0.75rem;
+  }
+
+  .map-frame {
+    min-height: 70svh;
   }
 }
 
@@ -301,14 +424,6 @@
   .sidebar,
   .map-stage {
     padding: 1rem;
-  }
-
-  .overlay-right {
-    top: auto;
-    right: auto;
-    left: 1rem;
-    bottom: 6.5rem;
-    width: min(320px, calc(100% - 2rem));
   }
 
   .overlay-bottom {

@@ -3,6 +3,14 @@ import { useEffect, useRef } from 'react'
 type ArcGISMapProps = {
   solarVisible: boolean
   windVisible: boolean
+  boundingBoxSelectionActive: boolean
+  onBoundingBoxSelectionChange: (active: boolean) => void
+  onBoundingBoxSelect: (boundingBox: {
+    xmin: number
+    ymin: number
+    xmax: number
+    ymax: number
+  }) => void
 }
 
 type LayerHandle = {
@@ -13,8 +21,22 @@ type MapHandle = {
   add: (layer: unknown) => void
 }
 
+type GraphicsLayerHandle = {
+  removeAll: () => void
+}
+
+type SketchHandle = {
+  create: (tool: string) => void
+  cancel: () => void
+  on: (eventName: string, callback: (event: Record<string, unknown>) => void) => {
+    remove: () => void
+  }
+}
+
 type ViewHandle = {
   destroy: () => void
+  zoom: number
+  goTo: (target: { zoom: number }, options?: { animate?: boolean }) => Promise<unknown>
 }
 
 declare global {
@@ -50,10 +72,28 @@ function loadArcGISApi() {
   return window.__arcgisPromise
 }
 
-export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
+export function ArcGISMap({
+  solarVisible,
+  windVisible,
+  boundingBoxSelectionActive,
+  onBoundingBoxSelectionChange,
+  onBoundingBoxSelect,
+}: ArcGISMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const solarLayerRef = useRef<LayerHandle | null>(null)
   const windLayerRef = useRef<LayerHandle | null>(null)
+  const viewRef = useRef<ViewHandle | null>(null)
+  const graphicsLayerRef = useRef<GraphicsLayerHandle | null>(null)
+  const sketchViewModelRef = useRef<SketchHandle | null>(null)
+
+  const updateZoom = (delta: number) => {
+    if (!viewRef.current) {
+      return
+    }
+
+    const nextZoom = Math.max(3, Math.min(11, viewRef.current.zoom + delta))
+    viewRef.current.goTo({ zoom: nextZoom }, { animate: true }).catch(() => {})
+  }
 
   useEffect(() => {
     let view: ViewHandle | null = null
@@ -70,16 +110,26 @@ export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
             'esri/Map',
             'esri/views/MapView',
             'esri/layers/GeoJSONLayer',
+            'esri/layers/GraphicsLayer',
+            'esri/widgets/Sketch/SketchViewModel',
           ],
           (...loaded: unknown[]) => {
             if (cancelled || !mapElementRef.current) {
               return
             }
 
-            const [MapCtor, MapViewCtor, GeoJSONLayerCtor] = loaded as [
+            const [
+              MapCtor,
+              MapViewCtor,
+              GeoJSONLayerCtor,
+              GraphicsLayerCtor,
+              SketchViewModelCtor,
+            ] = loaded as [
               new (...args: unknown[]) => MapHandle,
               new (...args: unknown[]) => ViewHandle,
               new (...args: unknown[]) => LayerHandle,
+              new (...args: unknown[]) => GraphicsLayerHandle,
+              new (...args: unknown[]) => SketchHandle,
             ]
 
             const solarLayer = new GeoJSONLayerCtor({
@@ -220,6 +270,10 @@ export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
             map.add(solarLayer)
             map.add(windLayer)
 
+            const graphicsLayer = new GraphicsLayerCtor()
+            map.add(graphicsLayer)
+            graphicsLayerRef.current = graphicsLayer
+
             view = new MapViewCtor({
               container: mapElementRef.current,
               map,
@@ -230,7 +284,7 @@ export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
                 maxZoom: 11,
               },
               ui: {
-                components: ['zoom', 'attribution'],
+                components: ['attribution'],
               },
               highlightOptions: {
                 color: '#c6ff7e',
@@ -238,6 +292,63 @@ export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
                 fillOpacity: 0.15,
               },
             })
+
+            viewRef.current = view
+
+            const sketchViewModel = new SketchViewModelCtor({
+              view,
+              layer: graphicsLayer,
+              defaultCreateOptions: {
+                mode: 'click',
+              },
+              polygonSymbol: {
+                type: 'simple-fill',
+                color: [214, 255, 114, 0.1],
+                outline: {
+                  color: [214, 255, 114, 0.95],
+                  width: 2,
+                },
+              },
+            })
+
+            sketchViewModel.on('create', (event) => {
+              const state = event.state
+
+              if (state === 'start') {
+                graphicsLayer.removeAll()
+              }
+
+              if (state !== 'complete') {
+                return
+              }
+
+              const graphic = event.graphic as {
+                geometry?: {
+                  extent?: {
+                    xmin: number
+                    ymin: number
+                    xmax: number
+                    ymax: number
+                  }
+                }
+              }
+
+              const extent = graphic.geometry?.extent
+              if (!extent) {
+                onBoundingBoxSelectionChange(false)
+                return
+              }
+
+              onBoundingBoxSelect({
+                xmin: extent.xmin,
+                ymin: extent.ymin,
+                xmax: extent.xmax,
+                ymax: extent.ymax,
+              })
+              onBoundingBoxSelectionChange(false)
+            })
+
+            sketchViewModelRef.current = sketchViewModel
           },
         )
       })
@@ -249,9 +360,12 @@ export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
       cancelled = true
       solarLayerRef.current = null
       windLayerRef.current = null
+      graphicsLayerRef.current = null
+      sketchViewModelRef.current = null
+      viewRef.current = null
       view?.destroy()
     }
-  }, [])
+  }, [onBoundingBoxSelect, onBoundingBoxSelectionChange])
 
   useEffect(() => {
     if (solarLayerRef.current) {
@@ -265,5 +379,32 @@ export function ArcGISMap({ solarVisible, windVisible }: ArcGISMapProps) {
     }
   }, [windVisible])
 
-  return <div ref={mapElementRef} className="arcgis-map" aria-label="United States map" />
+  useEffect(() => {
+    if (!sketchViewModelRef.current || !graphicsLayerRef.current) {
+      return
+    }
+
+    if (boundingBoxSelectionActive) {
+      graphicsLayerRef.current.removeAll()
+      sketchViewModelRef.current.cancel()
+      sketchViewModelRef.current.create('rectangle')
+      return
+    }
+
+    sketchViewModelRef.current.cancel()
+  }, [boundingBoxSelectionActive])
+
+  return (
+    <>
+      <div ref={mapElementRef} className="arcgis-map" aria-label="United States map" />
+      <div className="map-zoom-controls" aria-label="Map zoom controls">
+        <button type="button" className="zoom-button" onClick={() => updateZoom(1)}>
+          +
+        </button>
+        <button type="button" className="zoom-button" onClick={() => updateZoom(-1)}>
+          -
+        </button>
+      </div>
+    </>
+  )
 }
