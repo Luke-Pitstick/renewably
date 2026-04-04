@@ -136,6 +136,7 @@ export function ArcGISMap({
               url: '/data/us_solar_surface.geojson',
               title: 'Solar irradiation',
               visible: solarVisible,
+              popupEnabled: false,
               renderer: {
                 type: 'class-breaks',
                 field: 'solar_value',
@@ -210,54 +211,89 @@ export function ArcGISMap({
                   },
                 ],
               },
-              popupTemplate: {
-                title: 'Solar irradiation sample',
-                content: 'Interpolated annual mean solar value: {solar_value}',
-              },
-              opacity: 0.88,
+              opacity: 0.56,
             })
 
             const windLayer = new GeoJSONLayerCtor({
-              url: '/data/us_wind_speed_lower48.geojson',
+              url: '/data/us_wind_surface.geojson',
               title: 'Wind speed',
               visible: windVisible,
+              popupEnabled: false,
               renderer: {
-                type: 'simple',
-                symbol: {
-                  type: 'simple-marker',
-                  style: 'circle',
-                  color: '#8fe081',
+                type: 'class-breaks',
+                field: 'wind_value',
+                defaultSymbol: {
+                  type: 'simple-fill',
+                  color: 'rgba(67, 124, 161, 0.46)',
                   outline: {
-                    color: 'rgba(5, 15, 13, 0.7)',
-                    width: 0.8,
+                    color: 'rgba(255, 255, 255, 0)',
+                    width: 0,
                   },
                 },
-                visualVariables: [
+                classBreakInfos: [
                   {
-                    type: 'size',
-                    field: 'annual_mean_wind_speed',
-                    minDataValue: 1,
-                    maxDataValue: 8,
-                    minSize: 4,
-                    maxSize: 18,
+                    minValue: 1.6,
+                    maxValue: 2.1,
+                    symbol: {
+                      type: 'simple-fill',
+                      color: 'rgba(78, 120, 160, 0.44)',
+                      outline: { color: 'rgba(255,255,255,0)', width: 0 },
+                    },
+                    label: 'Lower wind resource',
                   },
                   {
-                    type: 'color',
-                    field: 'annual_mean_wind_speed',
-                    stops: [
-                      { value: 1, color: '#8bd3ff' },
-                      { value: 3, color: '#68f0cb' },
-                      { value: 5, color: '#d6ff72' },
-                      { value: 7, color: '#ffad5a' },
-                    ],
+                    minValue: 2.1,
+                    maxValue: 2.7,
+                    symbol: {
+                      type: 'simple-fill',
+                      color: 'rgba(79, 165, 189, 0.5)',
+                      outline: { color: 'rgba(255,255,255,0)', width: 0 },
+                    },
+                    label: 'Moderate wind resource',
+                  },
+                  {
+                    minValue: 2.7,
+                    maxValue: 3.3,
+                    symbol: {
+                      type: 'simple-fill',
+                      color: 'rgba(94, 212, 192, 0.56)',
+                      outline: { color: 'rgba(255,255,255,0)', width: 0 },
+                    },
+                    label: 'Balanced wind resource',
+                  },
+                  {
+                    minValue: 3.3,
+                    maxValue: 4.0,
+                    symbol: {
+                      type: 'simple-fill',
+                      color: 'rgba(160, 232, 162, 0.62)',
+                      outline: { color: 'rgba(255,255,255,0)', width: 0 },
+                    },
+                    label: 'Strong wind resource',
+                  },
+                  {
+                    minValue: 4.0,
+                    maxValue: 4.6,
+                    symbol: {
+                      type: 'simple-fill',
+                      color: 'rgba(214, 255, 114, 0.68)',
+                      outline: { color: 'rgba(255,255,255,0)', width: 0 },
+                    },
+                    label: 'Very strong wind resource',
+                  },
+                  {
+                    minValue: 4.6,
+                    maxValue: 5.0,
+                    symbol: {
+                      type: 'simple-fill',
+                      color: 'rgba(255, 189, 89, 0.76)',
+                      outline: { color: 'rgba(255,255,255,0)', width: 0 },
+                    },
+                    label: 'Peak wind resource',
                   },
                 ],
               },
-              popupTemplate: {
-                title: 'Wind speed sample',
-                content:
-                  'Annual mean wind speed: {annual_mean_wind_speed} m/s<br/>Year: {year}',
-              },
+              opacity: 0.5,
             })
 
             solarLayerRef.current = solarLayer

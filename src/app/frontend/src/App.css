@@ -355,6 +355,10 @@
   width: min(320px, calc(100% - 2rem));
 }
 
+.overlay-left-secondary {
+  top: 8.15rem;
+}
+
 .overlay-bottom {
   left: 1rem;
   right: 1rem;
@@ -368,6 +372,10 @@
   height: 0.8rem;
   border-radius: 999px;
   background: linear-gradient(90deg, #1fcf82 0%, #d8ff6d 35%, #f6ba4d 68%, #ee5f4b 100%);
+}
+
+.wind-legend-bar {
+  background: linear-gradient(90deg, #4e78a0 0%, #4fa5bd 28%, #5ed4c0 52%, #a0e8a2 74%, #ffbd59 100%);
 }
 
 .legend-values {

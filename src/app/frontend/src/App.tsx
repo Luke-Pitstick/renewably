@@ -190,6 +190,22 @@ function App() {
             </div>
           ) : null}
 
+          {windVisible ? (
+            <div
+              className={
+                solarVisible ? 'map-overlay overlay-left overlay-left-secondary' : 'map-overlay overlay-left'
+              }
+            >
+              <p className="panel-label">Wind speed</p>
+              <div className="legend-bar wind-legend-bar" aria-hidden="true" />
+              <div className="legend-values">
+                <span>Lower wind</span>
+                <span>Strong wind</span>
+                <span>Peak wind</span>
+              </div>
+            </div>
+          ) : null}
+
           <div className="map-overlay overlay-bottom">
             <div className="metric-chip">
               <span>Best solar</span>
