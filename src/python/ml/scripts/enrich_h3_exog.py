@@ -12,18 +12,19 @@ distance to roads.
 # %% Cell 0: Install dependencies (run once)
 # !pip install rasterio scipy requests geopandas polars h3
 
-# %% Cell 1: Imports & setup
-import ee
-import numpy as np
-import polars as pl
-import geopandas as gpd
-import requests
+import glob
+import hashlib
 import json
 import os
 import time
-import glob
-import hashlib
+
+# %% Cell 1: Imports & setup
+import ee
+import geopandas as gpd
 import h3
+import numpy as np
+import polars as pl
+import requests
 from scipy.spatial import cKDTree
 from shapely.geometry import Point
 from tqdm import tqdm
@@ -43,7 +44,7 @@ GEE_EXPORT_POLL_SECONDS = int(os.getenv("GEE_EXPORT_POLL_SECONDS", "15"))
 GEE_EXPORT_TIMEOUT_SECONDS = int(os.getenv("GEE_EXPORT_TIMEOUT_SECONDS", "7200"))
 GEE_DIRECT_SAMPLE_MAX_ROWS = int(os.getenv("GEE_DIRECT_SAMPLE_MAX_ROWS", "2000"))
 GEE_EXPORT_BATCH_SIZE = int(os.getenv("GEE_EXPORT_BATCH_SIZE", "2000"))
-GEE_RESUME_FROM_BATCH = int(os.getenv("GEE_RESUME_FROM_BATCH", "1"))
+GEE_RESUME_FROM_BATCH = int(os.getenv("GEE_RESUME_FROM_BATCH", "11"))
 GEE_STOP_AFTER_BATCH = int(os.getenv("GEE_STOP_AFTER_BATCH", "0"))
 FOREST_CODES = {41, 42, 43}
 CROP_CODES = {81, 82}
@@ -91,9 +92,8 @@ def build_gee_feature_image() -> ee.Image:
         kernel=ee.Kernel.square(3, "pixels"),
     ).rename("roughness")
 
-    era5 = (
-        ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR")
-        .select(["u_component_of_wind_10m", "v_component_of_wind_10m"])
+    era5 = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select(
+        ["u_component_of_wind_10m", "v_component_of_wind_10m"]
     )
 
     # Compute wind speed magnitude for each month, then reduce
@@ -115,8 +115,7 @@ def build_gee_feature_image() -> ee.Image:
     )
 
     return (
-        terrain
-        .addBands(roughness)
+        terrain.addBands(roughness)
         .addBands(mean_speed)
         .addBands(std_speed)
         .addBands(nlcd)
@@ -137,8 +136,10 @@ def sample_gee_features(fc: ee.FeatureCollection, feature_image: ee.Image) -> di
             last_error = exc
             if attempt == 3:
                 raise
-            sleep_s = 2 ** attempt
-            print(f"GEE request failed on attempt {attempt + 1}/4; retrying in {sleep_s}s")
+            sleep_s = 2**attempt
+            print(
+                f"GEE request failed on attempt {attempt + 1}/4; retrying in {sleep_s}s"
+            )
             time.sleep(sleep_s)
     else:
         raise last_error
@@ -180,7 +181,9 @@ def normalize_gee_feature_df(gee_df: pl.DataFrame) -> pl.DataFrame:
         "landcover": "h3_land_cover_code",
         "population_density": "h3_pop_density_km2",
     }
-    gee_df = gee_df.rename({src: dst for src, dst in rename_map.items() if src in gee_df.columns})
+    gee_df = gee_df.rename(
+        {src: dst for src, dst in rename_map.items() if src in gee_df.columns}
+    )
 
     if "h3_land_cover_code" not in gee_df.columns:
         return gee_df
@@ -197,7 +200,9 @@ def normalize_gee_feature_df(gee_df: pl.DataFrame) -> pl.DataFrame:
 
 
 def gee_feature_dict_to_df(feature_data: dict) -> pl.DataFrame:
-    rows = [{"h3_index": h3_index, **values} for h3_index, values in feature_data.items()]
+    rows = [
+        {"h3_index": h3_index, **values} for h3_index, values in feature_data.items()
+    ]
     return pl.DataFrame(rows) if rows else pl.DataFrame()
 
 
@@ -276,9 +281,13 @@ def wait_for_ee_task(task: object, description: str) -> None:
         if state == "COMPLETED":
             return
         if state in {"FAILED", "CANCELLED"}:
-            raise RuntimeError(f"Earth Engine export {description} {state.lower()}: {status}")
+            raise RuntimeError(
+                f"Earth Engine export {description} {state.lower()}: {status}"
+            )
         if time.time() - started_at > GEE_EXPORT_TIMEOUT_SECONDS:
-            raise TimeoutError(f"Timed out waiting for Earth Engine export {description}")
+            raise TimeoutError(
+                f"Timed out waiting for Earth Engine export {description}"
+            )
 
         print(f"Export {description} status: {state}")
         time.sleep(GEE_EXPORT_POLL_SECONDS)
@@ -303,7 +312,9 @@ def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFram
     if len(df) <= GEE_DIRECT_SAMPLE_MAX_ROWS:
         fc = centroids_to_ee_fc(df)
         print(f"Using direct Earth Engine sampling for {len(df)} unique H3 cells")
-        return normalize_gee_feature_df(gee_feature_dict_to_df(sample_gee_features(fc, feature_image)))
+        return normalize_gee_feature_df(
+            gee_feature_dict_to_df(sample_gee_features(fc, feature_image))
+        )
 
     if not os.path.exists(GEE_DRIVE_MOUNT_ROOT):
         raise FileNotFoundError(
@@ -312,12 +323,18 @@ def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFram
         )
 
     batch_frames = []
-    for batch_num, total_batches, batch_df in iter_df_batches(df, GEE_EXPORT_BATCH_SIZE):
+    for batch_num, total_batches, batch_df in iter_df_batches(
+        df, GEE_EXPORT_BATCH_SIZE
+    ):
         if batch_num < GEE_RESUME_FROM_BATCH:
-            print(f"[GEE {batch_num}/{total_batches}] Skipping batch before GEE_RESUME_FROM_BATCH={GEE_RESUME_FROM_BATCH}")
+            print(
+                f"[GEE {batch_num}/{total_batches}] Skipping batch before GEE_RESUME_FROM_BATCH={GEE_RESUME_FROM_BATCH}"
+            )
             continue
         if GEE_STOP_AFTER_BATCH and batch_num > GEE_STOP_AFTER_BATCH:
-            print(f"[GEE] Stopping before batch {batch_num} due to GEE_STOP_AFTER_BATCH={GEE_STOP_AFTER_BATCH}")
+            print(
+                f"[GEE] Stopping before batch {batch_num} due to GEE_STOP_AFTER_BATCH={GEE_STOP_AFTER_BATCH}"
+            )
             break
 
         checkpoint_df = load_batch_checkpoint(df, batch_num)
@@ -331,7 +348,9 @@ def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFram
 
         exported_csv = find_exported_batch_csv(df, batch_num)
         if exported_csv:
-            print(f"[GEE {batch_num}/{total_batches}] Loaded existing Drive export from {exported_csv}")
+            print(
+                f"[GEE {batch_num}/{total_batches}] Loaded existing Drive export from {exported_csv}"
+            )
             batch_result = normalize_gee_feature_df(pl.read_csv(exported_csv))
             batch_result = batch_result.unique(subset=["h3_index"], keep="last")
             save_batch_checkpoint(df, batch_num, batch_result)
@@ -346,16 +365,22 @@ def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFram
                 f"[GEE {batch_num}/{total_batches}] Submitting Earth Engine export "
                 f"{description} ({len(batch_df)} H3 cells) to Drive folder {GEE_DRIVE_FOLDER}"
             )
-            task = export_gee_features_to_drive(fc, feature_image, description, description)
+            task = export_gee_features_to_drive(
+                fc, feature_image, description, description
+            )
         else:
-            print(f"[GEE {batch_num}/{total_batches}] Reusing active Earth Engine export task {description}")
+            print(
+                f"[GEE {batch_num}/{total_batches}] Reusing active Earth Engine export task {description}"
+            )
         wait_for_ee_task(task, description)
 
         started_at = time.time()
         while True:
             exported_csv = find_exported_batch_csv(df, batch_num)
             if exported_csv:
-                print(f"[GEE {batch_num}/{total_batches}] Found exported CSV at {exported_csv}")
+                print(
+                    f"[GEE {batch_num}/{total_batches}] Found exported CSV at {exported_csv}"
+                )
                 batch_result = normalize_gee_feature_df(pl.read_csv(exported_csv))
                 batch_result = batch_result.unique(subset=["h3_index"], keep="last")
                 save_batch_checkpoint(df, batch_num, batch_result)
@@ -374,7 +399,9 @@ def batch_checkpoint_path(df: pl.DataFrame, batch_num: int) -> str:
     return os.path.join(CHECKPOINT_DIR, f"{export_batch_prefix(df, batch_num)}.parquet")
 
 
-def save_batch_checkpoint(df: pl.DataFrame, batch_num: int, batch_df: pl.DataFrame) -> None:
+def save_batch_checkpoint(
+    df: pl.DataFrame, batch_num: int, batch_df: pl.DataFrame
+) -> None:
     batch_df.write_parquet(batch_checkpoint_path(df, batch_num))
 
 
@@ -553,6 +580,7 @@ def fetch_road_distances(df: pl.DataFrame) -> dict:
         with open(zip_path, "wb") as f:
             f.write(resp.content)
         import zipfile
+
         with zipfile.ZipFile(zip_path, "r") as z:
             z.extractall(roads_dir)
         print("Extracted roads shapefile.")
@@ -595,7 +623,9 @@ def enrich_dataframe(df: pl.DataFrame) -> pl.DataFrame:
     """Run all enrichment steps and join results into the DataFrame."""
     unique_df = unique_h3_centroids(df)
     feature_image = build_gee_feature_image()
-    print(f"=== GEE enrichment: {len(unique_df)} unique H3 cells from {len(df)} rows ===")
+    print(
+        f"=== GEE enrichment: {len(unique_df)} unique H3 cells from {len(df)} rows ==="
+    )
     gee_df = load_gee_export_df(unique_df, feature_image)
     gee_df = gee_df.unique(subset=["h3_index"], keep="last")
     elev_data, wind_data, lc_data, pop_data = materialize_gee_dicts(gee_df)
