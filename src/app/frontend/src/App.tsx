@@ -4,7 +4,6 @@ import { ArcGISMap } from './ArcGISMap'
 
 type OptimizationMode = 'cash' | 'power'
 type SidebarSectionKey = 'optimization' | 'layers'
-type MapLayerKey = 'solar' | 'wind'
 
 type BoundingBox = {
   xmin: number
@@ -23,9 +22,11 @@ type EditSelectionRequest = {
 }
 
 function App() {
-  const [mapLayer, setMapLayer] = useState<MapLayerKey>('solar')
-  const solarVisible = mapLayer === 'solar'
-  const windVisible = mapLayer === 'wind'
+  const [solarVisible, setSolarVisible] = useState(false)
+  const [windVisible, setWindVisible] = useState(true)
+  const [solarFarmsVisible, setSolarFarmsVisible] = useState(false)
+  const [windFarmsVisible, setWindFarmsVisible] = useState(false)
+  const [powerLinesVisible, setPowerLinesVisible] = useState(false)
   const [openSections, setOpenSections] = useState<
     Record<SidebarSectionKey, boolean>
   >({
@@ -43,7 +44,12 @@ function App() {
     useState<LocationSearchRequest | null>(null)
   const [editSelectionRequest, setEditSelectionRequest] =
     useState<EditSelectionRequest | null>(null)
-  const mapLayerBadgeLabel = mapLayer === 'solar' ? 'Solar' : 'Wind'
+  const activeLayerCount =
+    Number(solarVisible) +
+    Number(windVisible) +
+    Number(solarFarmsVisible) +
+    Number(windFarmsVisible) +
+    Number(powerLinesVisible)
   const inputLabel =
     optimizationMode === 'cash' ? 'Available budget' : 'Target power need'
   const inputPlaceholder =
@@ -53,11 +59,6 @@ function App() {
     ? 'Area selected on map'
     : 'No area selected'
   const hasBoundingBox = boundingBox !== null
-  const legendTitle = solarVisible ? 'Solar irradiation' : 'Wind speed'
-  const legendUnit = solarVisible ? 'kWh/m²/day' : 'm/s'
-  const legendLabels = solarVisible
-    ? ['Lower resource', 'Strong resource', 'Peak resource']
-    : ['Lower wind', 'Strong wind', 'Peak wind']
   const toggleSection = (section: SidebarSectionKey) => {
     setOpenSections((current) => ({
       ...current,
@@ -248,7 +249,7 @@ function App() {
               <div className="sidebar-panel-heading">
                 <div className="sidebar-panel-title-group">
                   <p className="panel-label">Map layers</p>
-                  <span className="badge">{mapLayerBadgeLabel}</span>
+                  <span className="badge">{activeLayerCount} active</span>
                 </div>
                 <span
                   className={
@@ -265,22 +266,20 @@ function App() {
               <div
                 id="sidebar-layers-panel"
                 className="sidebar-panel-content"
-                role="radiogroup"
-                aria-label="Map layer"
+                aria-label="Map layers"
               >
                 <div className="sidebar-layer-list">
                   <label className="sidebar-layer-card">
                     <div className="sidebar-layer-card-text">
                       <strong>Solar irradiation</strong>
-                      <p>Heatmap from annual solar averages</p>
+                      <p>Estimated solar resource intensity across the US</p>
                     </div>
                     <input
-                      type="radio"
-                      name="map-layer"
-                      checked={mapLayer === 'solar'}
+                      type="checkbox"
+                      checked={solarVisible}
                       onChange={() => {
                         startTransition(() => {
-                          setMapLayer('solar')
+                          setSolarVisible((current) => !current)
                         })
                       }}
                     />
@@ -288,15 +287,59 @@ function App() {
                   <label className="sidebar-layer-card">
                     <div className="sidebar-layer-card-text">
                       <strong>Wind speed</strong>
-                      <p>Point layer from annual wind speed data</p>
+                      <p>Estimated wind resource intensity across the US</p>
                     </div>
                     <input
-                      type="radio"
-                      name="map-layer"
-                      checked={mapLayer === 'wind'}
+                      type="checkbox"
+                      checked={windVisible}
                       onChange={() => {
                         startTransition(() => {
-                          setMapLayer('wind')
+                          setWindVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+                  <label className="sidebar-layer-card">
+                    <div className="sidebar-layer-card-text">
+                      <strong>Solar farm sites</strong>
+                      <p>Known solar farm locations across the US</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={solarFarmsVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setSolarFarmsVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+                  <label className="sidebar-layer-card">
+                    <div className="sidebar-layer-card-text">
+                      <strong>Wind farm sites</strong>
+                      <p>Known wind farm locations across the US</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={windFarmsVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setWindFarmsVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+                  <label className="sidebar-layer-card">
+                    <div className="sidebar-layer-card-text">
+                      <strong>Major power lines</strong>
+                      <p>Major electric transmission lines across the US</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={powerLinesVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setPowerLinesVisible((current) => !current)
                         })
                       }}
                     />
@@ -337,6 +380,9 @@ function App() {
           <ArcGISMap
             solarVisible={solarVisible}
             windVisible={windVisible}
+            solarFarmsVisible={solarFarmsVisible}
+            windFarmsVisible={windFarmsVisible}
+            powerLinesVisible={powerLinesVisible}
             boundingBox={boundingBox}
             boundingBoxSelectionActive={boundingBoxSelectionActive}
             editSelectionRequest={editSelectionRequest}
@@ -345,23 +391,41 @@ function App() {
             locationSearchRequest={locationSearchRequest}
           />
 
-          <div className="map-overlay overlay-legend">
-            <div className="legend-header">
-              <p className="panel-label">{legendTitle}</p>
-              <span className="legend-unit">{legendUnit}</span>
+          {solarVisible ? (
+            <div className="map-overlay overlay-legend">
+              <div className="legend-header">
+                <p className="panel-label">Solar irradiation</p>
+                <span className="legend-unit">kWh/m²/day</span>
+              </div>
+              <div className="legend-bar" aria-hidden="true" />
+              <div className="legend-values">
+                <span>Lower resource</span>
+                <span>Strong resource</span>
+                <span>Peak resource</span>
+              </div>
             </div>
+          ) : null}
+
+          {windVisible ? (
             <div
               className={
-                solarVisible ? 'legend-bar' : 'legend-bar wind-legend-bar'
+                solarVisible
+                  ? 'map-overlay overlay-legend overlay-legend-secondary'
+                  : 'map-overlay overlay-legend'
               }
-              aria-hidden="true"
-            />
-            <div className="legend-values">
-              {legendLabels.map((label) => (
-                <span key={label}>{label}</span>
-              ))}
+            >
+              <div className="legend-header">
+                <p className="panel-label">Wind speed</p>
+                <span className="legend-unit">m/s</span>
+              </div>
+              <div className="legend-bar wind-legend-bar" aria-hidden="true" />
+              <div className="legend-values">
+                <span>Lower wind</span>
+                <span>Strong wind</span>
+                <span>Peak wind</span>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       </section>
     </main>

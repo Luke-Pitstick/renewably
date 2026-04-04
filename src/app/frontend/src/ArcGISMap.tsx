@@ -3,6 +3,9 @@ import { memo, useEffect, useRef, useState } from 'react'
 type ArcGISMapProps = {
   solarVisible: boolean
   windVisible: boolean
+  solarFarmsVisible: boolean
+  windFarmsVisible: boolean
+  powerLinesVisible: boolean
   boundingBox: {
     xmin: number
     ymin: number
@@ -26,7 +29,12 @@ type ArcGISMapProps = {
   } | null) => void
 }
 
-type ThemeLayerKind = 'solar' | 'wind'
+type ThemeLayerKind =
+  | 'solar'
+  | 'wind'
+  | 'solarFarms'
+  | 'windFarms'
+  | 'powerLines'
 
 type LayerHandle = {
   visible: boolean
@@ -85,6 +93,7 @@ type ArcGISPointCtor = new (properties: {
 type MapCtor = new (properties?: Record<string, unknown>) => MapHandle
 type MapViewCtor = new (properties?: Record<string, unknown>) => ViewHandle
 type GeoJSONLayerCtor = new (properties?: Record<string, unknown>) => LayerHandle
+type FeatureLayerCtor = new (properties?: Record<string, unknown>) => LayerHandle
 type GraphicsLayerCtor = new (
   properties?: Record<string, unknown>,
 ) => GraphicsLayerHandle
@@ -100,6 +109,7 @@ type CoreModules = {
   MapCtor: MapCtor
   MapViewCtor: MapViewCtor
   GeoJSONLayerCtor: GeoJSONLayerCtor
+  FeatureLayerCtor: FeatureLayerCtor
   GraphicsLayerCtor: GraphicsLayerCtor
   SketchViewModelCtor: SketchViewModelCtor
   PointCtor: ArcGISPointCtor
@@ -189,6 +199,10 @@ declare global {
 
 const SOLAR_DATA_URL = '/data/us_solar_surface.geojson'
 const WIND_DATA_URL = '/data/us_wind_surface.geojson'
+const SOLAR_FARMS_DATA_URL = '/data/solar_farm_sites.geojson'
+const WIND_FARMS_DATA_URL = '/data/wind_farm_sites.geojson'
+const POWER_LINES_DATA_URL =
+  'https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Electric_Power_Transmission_Lines/FeatureServer/0'
 const LOCATOR_URL =
   'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer'
 const MAX_WIND_CANVAS_DPR = 1.25
@@ -201,6 +215,24 @@ const LOWER_48_VIEW = {
 
 let coreModulesPromise: Promise<CoreModules> | null = null
 let locatorModulePromise: Promise<LocatorModule> | null = null
+const SOLAR_FARM_ICON_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+    <rect x="8" y="12" width="32" height="18" rx="3" fill="#17312a" stroke="#d8ff6d" stroke-width="2.4"/>
+    <path d="M16 12v18M24 12v18M32 12v18M8 18h32M8 24h32" stroke="#8fe2b8" stroke-width="1.8" opacity="0.9"/>
+    <path d="M24 30v8" stroke="#d8ff6d" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M18 38h12" stroke="#d8ff6d" stroke-width="2.4" stroke-linecap="round"/>
+  </svg>`,
+)}`
+const WIND_FARM_ICON_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+    <path d="M24 17v20" stroke="#dff6ff" stroke-width="2.8" stroke-linecap="round"/>
+    <circle cx="24" cy="14" r="2.7" fill="#dff6ff"/>
+    <path d="M24 14L10 18" stroke="#8cd6ff" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M24 14L34 7" stroke="#68f0cb" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M24 14L30 28" stroke="#d8ff6d" stroke-width="2.8" stroke-linecap="round"/>
+    <path d="M20 39h8" stroke="#dff6ff" stroke-width="2.8" stroke-linecap="round"/>
+  </svg>`,
+)}`
 
 const PARTICLE_STYLE_PALETTE: ParticleStyle[] = Array.from(
   { length: 10 },
@@ -310,6 +342,7 @@ function loadCoreArcGISModules() {
         MapCtor,
         MapViewCtor,
         GeoJSONLayerCtor,
+        FeatureLayerCtor,
         GraphicsLayerCtor,
         SketchViewModelCtor,
         ArcGISPointCtor,
@@ -319,6 +352,7 @@ function loadCoreArcGISModules() {
       'esri/Map',
       'esri/views/MapView',
       'esri/layers/GeoJSONLayer',
+      'esri/layers/FeatureLayer',
       'esri/layers/GraphicsLayer',
       'esri/widgets/Sketch/SketchViewModel',
       'esri/geometry/Point',
@@ -328,6 +362,7 @@ function loadCoreArcGISModules() {
         MapCtor,
         MapViewCtor,
         GeoJSONLayerCtor,
+        FeatureLayerCtor,
         GraphicsLayerCtor,
         SketchViewModelCtor,
         PointCtor,
@@ -336,6 +371,7 @@ function loadCoreArcGISModules() {
         MapCtor,
         MapViewCtor,
         GeoJSONLayerCtor,
+        FeatureLayerCtor,
         GraphicsLayerCtor,
         SketchViewModelCtor,
         PointCtor,
@@ -801,6 +837,7 @@ function clearCanvas(
 function createThemeLayer(
   kind: ThemeLayerKind,
   GeoJSONLayerCtor: GeoJSONLayerCtor,
+  FeatureLayerCtor: FeatureLayerCtor,
   visible: boolean,
 ) {
   if (kind === 'solar') {
@@ -884,7 +921,67 @@ function createThemeLayer(
           },
         ],
       },
-      opacity: 0.56,
+    opacity: 0.56,
+  })
+  }
+
+  if (kind === 'solarFarms') {
+    return new GeoJSONLayerCtor({
+      url: SOLAR_FARMS_DATA_URL,
+      title: 'Solar farm sites',
+      visible,
+      popupEnabled: false,
+      renderer: {
+        type: 'simple',
+        symbol: {
+          type: 'picture-marker',
+          url: SOLAR_FARM_ICON_URL,
+          width: '13px',
+          height: '13px',
+        },
+      },
+      opacity: 0.95,
+    })
+  }
+
+  if (kind === 'windFarms') {
+    return new GeoJSONLayerCtor({
+      url: WIND_FARMS_DATA_URL,
+      title: 'Wind farm sites',
+      visible,
+      popupEnabled: false,
+      renderer: {
+        type: 'simple',
+        symbol: {
+          type: 'picture-marker',
+          url: WIND_FARM_ICON_URL,
+          width: '12px',
+          height: '12px',
+        },
+      },
+      opacity: 0.9,
+    })
+  }
+
+  if (kind === 'powerLines') {
+    return new FeatureLayerCtor({
+      url: POWER_LINES_DATA_URL,
+      title: 'Major power lines',
+      visible,
+      popupEnabled: false,
+      renderer: {
+        type: 'simple',
+        symbol: {
+          type: 'simple-line',
+          color: [210, 220, 226, 0.42],
+          width: 1.2,
+          cap: 'round',
+          join: 'round',
+        },
+      },
+      opacity: 0.72,
+      minScale: 0,
+      maxScale: 0,
     })
   }
 
@@ -975,6 +1072,9 @@ function createThemeLayer(
 export const ArcGISMap = memo(function ArcGISMap({
   solarVisible,
   windVisible,
+  solarFarmsVisible,
+  windFarmsVisible,
+  powerLinesVisible,
   boundingBox,
   boundingBoxSelectionActive,
   editSelectionRequest,
@@ -992,9 +1092,15 @@ export const ArcGISMap = memo(function ArcGISMap({
   const coreModulesRef = useRef<CoreModules | null>(null)
   const solarLayerRef = useRef<LayerHandle | null>(null)
   const windLayerRef = useRef<LayerHandle | null>(null)
+  const solarFarmsLayerRef = useRef<LayerHandle | null>(null)
+  const windFarmsLayerRef = useRef<LayerHandle | null>(null)
+  const powerLinesLayerRef = useRef<LayerHandle | null>(null)
   const boundingBoxSelectionActiveRef = useRef(boundingBoxSelectionActive)
   const initialSolarVisibleRef = useRef(solarVisible)
   const initialWindVisibleRef = useRef(windVisible)
+  const initialSolarFarmsVisibleRef = useRef(solarFarmsVisible)
+  const initialWindFarmsVisibleRef = useRef(windFarmsVisible)
+  const initialPowerLinesVisibleRef = useRef(powerLinesVisible)
   const latestSearchIdRef = useRef(0)
   const interactionStateRef = useRef(true)
   const lastMotionAtRef = useRef(0)
@@ -1016,22 +1122,44 @@ export const ArcGISMap = memo(function ArcGISMap({
       return windLayerRef.current
     }
 
-    const layer = createThemeLayer(kind, coreModules.GeoJSONLayerCtor, true)
-    const index =
-      kind === 'solar'
-        ? windLayerRef.current
-          ? 0
-          : 0
-        : solarLayerRef.current
-          ? 1
-          : 0
+    if (kind === 'solarFarms' && solarFarmsLayerRef.current) {
+      return solarFarmsLayerRef.current
+    }
 
-    map.add(layer, index)
+    if (kind === 'windFarms' && windFarmsLayerRef.current) {
+      return windFarmsLayerRef.current
+    }
+
+    if (kind === 'powerLines' && powerLinesLayerRef.current) {
+      return powerLinesLayerRef.current
+    }
+
+    const layer = createThemeLayer(
+      kind,
+      coreModules.GeoJSONLayerCtor,
+      coreModules.FeatureLayerCtor,
+      true,
+    )
+    const indexByKind: Record<ThemeLayerKind, number> = {
+      solar: 0,
+      wind: 1,
+      solarFarms: 2,
+      windFarms: 3,
+      powerLines: 4,
+    }
+
+    map.add(layer, indexByKind[kind])
 
     if (kind === 'solar') {
       solarLayerRef.current = layer
-    } else {
+    } else if (kind === 'wind') {
       windLayerRef.current = layer
+    } else if (kind === 'solarFarms') {
+      solarFarmsLayerRef.current = layer
+    } else if (kind === 'windFarms') {
+      windFarmsLayerRef.current = layer
+    } else {
+      powerLinesLayerRef.current = layer
     }
 
     return layer
@@ -1113,6 +1241,7 @@ export const ArcGISMap = memo(function ArcGISMap({
           solarLayerRef.current = createThemeLayer(
             'solar',
             coreModules.GeoJSONLayerCtor,
+            coreModules.FeatureLayerCtor,
             true,
           )
           map.add(solarLayerRef.current, 0)
@@ -1122,9 +1251,40 @@ export const ArcGISMap = memo(function ArcGISMap({
           windLayerRef.current = createThemeLayer(
             'wind',
             coreModules.GeoJSONLayerCtor,
+            coreModules.FeatureLayerCtor,
             true,
           )
           map.add(windLayerRef.current, solarLayerRef.current ? 1 : 0)
+        }
+
+        if (initialSolarFarmsVisibleRef.current) {
+          solarFarmsLayerRef.current = createThemeLayer(
+            'solarFarms',
+            coreModules.GeoJSONLayerCtor,
+            coreModules.FeatureLayerCtor,
+            true,
+          )
+          map.add(solarFarmsLayerRef.current, 2)
+        }
+
+        if (initialWindFarmsVisibleRef.current) {
+          windFarmsLayerRef.current = createThemeLayer(
+            'windFarms',
+            coreModules.GeoJSONLayerCtor,
+            coreModules.FeatureLayerCtor,
+            true,
+          )
+          map.add(windFarmsLayerRef.current, 3)
+        }
+
+        if (initialPowerLinesVisibleRef.current) {
+          powerLinesLayerRef.current = createThemeLayer(
+            'powerLines',
+            coreModules.GeoJSONLayerCtor,
+            coreModules.FeatureLayerCtor,
+            true,
+          )
+          map.add(powerLinesLayerRef.current, 4)
         }
 
         const graphicsLayer = new coreModules.GraphicsLayerCtor()
@@ -1243,6 +1403,9 @@ export const ArcGISMap = memo(function ArcGISMap({
       selectionGraphicRef.current = null
       solarLayerRef.current = null
       windLayerRef.current = null
+      solarFarmsLayerRef.current = null
+      windFarmsLayerRef.current = null
+      powerLinesLayerRef.current = null
       graphicsLayerRef.current = null
       sketchViewModelRef.current = null
       coreModulesRef.current = null
@@ -1271,6 +1434,36 @@ export const ArcGISMap = memo(function ArcGISMap({
       windLayerRef.current.visible = windVisible
     }
   }, [windVisible])
+
+  useEffect(() => {
+    if (solarFarmsVisible) {
+      ensureThemeLayer('solarFarms')
+    }
+
+    if (solarFarmsLayerRef.current) {
+      solarFarmsLayerRef.current.visible = solarFarmsVisible
+    }
+  }, [solarFarmsVisible])
+
+  useEffect(() => {
+    if (windFarmsVisible) {
+      ensureThemeLayer('windFarms')
+    }
+
+    if (windFarmsLayerRef.current) {
+      windFarmsLayerRef.current.visible = windFarmsVisible
+    }
+  }, [windFarmsVisible])
+
+  useEffect(() => {
+    if (powerLinesVisible) {
+      ensureThemeLayer('powerLines')
+    }
+
+    if (powerLinesLayerRef.current) {
+      powerLinesLayerRef.current.visible = powerLinesVisible
+    }
+  }, [powerLinesVisible])
 
   useEffect(() => {
     if (!sketchViewModelRef.current || !graphicsLayerRef.current) {

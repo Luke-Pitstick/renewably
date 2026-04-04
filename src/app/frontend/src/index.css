@@ -34,19 +34,27 @@
   --map-glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
   --map-glass-radius: 16px;
 
-  /* Flat sidebar surfaces (no gradients / glass) */
-  --sidebar-bg: #1f1f1d;
-  --sidebar-surface: #292826;
-  --sidebar-control: #232321;
-  --sidebar-control-active: #3f3d39;
-  --sidebar-border: rgba(255, 255, 255, 0.09);
-  --sidebar-border-strong: rgba(208, 168, 109, 0.22);
-  --sidebar-primary: #6e6a63;
-  --sidebar-primary-hover: #7f7a73;
-  --sidebar-primary-text: #f4efe7;
-  --sidebar-primary-border: rgba(232, 222, 205, 0.12);
-  --sidebar-radius: 0.25rem;
-  --sidebar-radius-inner: 0.125rem;
+  --sidebar-shell:
+    radial-gradient(circle at top left, rgba(102, 208, 152, 0.26), transparent 30%),
+    radial-gradient(circle at 80% 15%, rgba(163, 223, 143, 0.16), transparent 22%),
+    linear-gradient(180deg, #202a28 0%, #18201f 42%, #141716 100%);
+  --sidebar-bg: rgba(24, 35, 31, 0.8);
+  --sidebar-surface:
+    linear-gradient(180deg, rgba(36, 54, 49, 0.94), rgba(25, 35, 33, 0.94));
+  --sidebar-control:
+    linear-gradient(180deg, rgba(42, 65, 59, 0.9), rgba(30, 42, 39, 0.92));
+  --sidebar-control-active:
+    linear-gradient(135deg, rgba(82, 154, 116, 0.98), rgba(46, 99, 77, 0.94));
+  --sidebar-border: rgba(214, 241, 227, 0.1);
+  --sidebar-border-strong: rgba(140, 230, 181, 0.42);
+  --sidebar-primary:
+    linear-gradient(135deg, #9fe18d 0%, #67c28e 100%);
+  --sidebar-primary-hover:
+    linear-gradient(135deg, #b3e99d 0%, #78cf9b 100%);
+  --sidebar-primary-text: #12201a;
+  --sidebar-primary-border: rgba(189, 236, 198, 0.28);
+  --sidebar-radius: 1.15rem;
+  --sidebar-radius-inner: 0.9rem;
 }
 
 * {
