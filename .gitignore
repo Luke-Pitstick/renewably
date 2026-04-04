@@ -211,3 +211,12 @@ src/python/ml/data/*.csv
 src/python/ml/data/*.geojson
 src/python/ml/data/geoJSON/*.geojson
 src/python/ml/models/*.pkl
+
+.DS_Store
+
+/node_modules
+/dist
+/dist-ssr
+/*.local
+
+/src/python/ml/data/geoJSON/*.geojson
