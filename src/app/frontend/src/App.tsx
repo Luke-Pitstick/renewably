@@ -61,11 +61,74 @@ type OptimizationResponse = {
   points?: OptimizationPoint[]
 }
 
+type GeoJsonPointFeature = {
+  type: 'Feature'
+  geometry: {
+    type: 'Point'
+    coordinates: [number, number]
+  }
+  properties: Record<string, number | string>
+}
+
+type GeoJsonFeatureCollection = {
+  type: 'FeatureCollection'
+  features: GeoJsonPointFeature[]
+}
+
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ??
   'http://127.0.0.1:8000'
 const LOCATION_SUGGEST_URL =
   'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest'
+
+function isFiniteCoordinate(value: number) {
+  return Number.isFinite(value)
+}
+
+function buildOptimizationGeoJson(points: OptimizationPoint[]): GeoJsonFeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: points.flatMap((point, index) => {
+      if (!isFiniteCoordinate(point.lon) || !isFiniteCoordinate(point.lat)) {
+        return []
+      }
+
+      return [
+        {
+          type: 'Feature' as const,
+          geometry: {
+            type: 'Point' as const,
+            coordinates: [point.lon, point.lat] as [number, number],
+          },
+          properties: {
+            site_id: index + 1,
+            device_type: point.device_type,
+            solar_power_kwh: point.solar_power_kwh,
+            wind_power_kwh: point.wind_power_kwh,
+            ...(point.solar_probability !== undefined
+              ? { solar_probability: point.solar_probability }
+              : {}),
+            ...(point.wind_probability !== undefined
+              ? { wind_probability: point.wind_probability }
+              : {}),
+            ...(point.expected_power_kwh !== undefined
+              ? { expected_power_kwh: point.expected_power_kwh }
+              : {}),
+            ...(point.selected_power_kwh !== undefined
+              ? { selected_power_kwh: point.selected_power_kwh }
+              : {}),
+            ...(point.device_cost_usd !== undefined
+              ? { device_cost_usd: point.device_cost_usd }
+              : {}),
+            ...(point.effective_cost_usd !== undefined
+              ? { effective_cost_usd: point.effective_cost_usd }
+              : {}),
+          },
+        },
+      ]
+    }),
+  }
+}
 
 function App() {
   const [topographyVisible, setTopographyVisible] = useState(true)
@@ -127,6 +190,10 @@ function App() {
     Number.isFinite(optimizationTargetValue) &&
     optimizationTargetValue > 0 &&
     !optimizationSubmitting
+  const optimizationPoints = optimizationResult?.points ?? []
+  const downloadableOptimizationPointCount = optimizationPoints.filter(
+    (point) => isFiniteCoordinate(point.lon) && isFiniteCoordinate(point.lat),
+  ).length
 
   useEffect(() => {
     if (trimmedDeferredLocationQuery.length < 2) {
@@ -269,6 +336,29 @@ function App() {
     } finally {
       setOptimizationSubmitting(false)
     }
+  }
+
+  const downloadOptimizationGeoJson = () => {
+    if (!optimizationResult || downloadableOptimizationPointCount === 0) {
+      return
+    }
+
+    const geoJson = buildOptimizationGeoJson(optimizationPoints)
+    const blob = new Blob([JSON.stringify(geoJson, null, 2)], {
+      type: 'application/geo+json;charset=utf-8',
+    })
+    const downloadUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const dateStamp = new Date().toISOString().slice(0, 10)
+
+    link.href = downloadUrl
+    link.download = `renewably-${optimizationResult.mode}-optimization-sites-${dateStamp}.geojson`
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => {
+      URL.revokeObjectURL(downloadUrl)
+    }, 0)
   }
 
   return (
@@ -901,6 +991,16 @@ function App() {
                     </strong>
                   </div>
                 ) : null}
+              </div>
+              <div className="overlay-results-actions">
+                <button
+                  type="button"
+                  className="sidebar-submit"
+                  disabled={downloadableOptimizationPointCount === 0}
+                  onClick={downloadOptimizationGeoJson}
+                >
+                  Download sites as GeoJSON
+                </button>
               </div>
             </div>
           ) : null}

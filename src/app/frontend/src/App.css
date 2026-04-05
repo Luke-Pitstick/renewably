@@ -1026,6 +1026,11 @@
   margin-top: 0.1rem;
 }
 
+.overlay-results-actions {
+  display: grid;
+  margin-top: 0.7rem;
+}
+
 .overlay-results-header {
   align-items: flex-start;
 }
