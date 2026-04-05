@@ -1,5 +1,7 @@
 import math
 import json
+import os
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -8,6 +10,7 @@ import joblib
 import modal
 import numpy as np
 import pandas as pd
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -16,12 +19,18 @@ app = modal.App("energy-predictor")
 
 BACKEND_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BACKEND_DIR.parent / "ml" / "models"
+ML_DATA_DIR = BACKEND_DIR.parent / "ml" / "data"
+FEATURE_EXPORT_DIR = ML_DATA_DIR / "renewably_exports"
 SOLAR_MODEL_FILE = MODEL_DIR / "solar_xgboost_model.pkl"
 WIND_MODEL_FILE = MODEL_DIR / "wind_xgboost_model.pkl"
+CHANCE_MODEL_FILE = MODEL_DIR / "chance_model.pkl"
 VOLUME_SOLAR_MODEL_PATH = "/models/solar_xgboost_model.pkl"
 VOLUME_WIND_MODEL_PATH = "/models/wind_xgboost_model.pkl"
+VOLUME_CHANCE_MODEL_PATH = "/models/chance_model.pkl"
 FALLBACK_SOLAR_MODEL_PATH = "/seed_models/solar_xgboost_model.pkl"
 FALLBACK_WIND_MODEL_PATH = "/seed_models/wind_xgboost_model.pkl"
+FALLBACK_CHANCE_MODEL_PATH = "/seed_models/chance_model.pkl"
+SEED_FEATURE_EXPORT_DIR = Path("/seed_feature_cache/renewably_exports")
 
 image = modal.Image.debian_slim().pip_install(
     "fastapi",
@@ -29,8 +38,13 @@ image = modal.Image.debian_slim().pip_install(
     "joblib",
     "xgboost",
     "scikit-learn",
+    "imbalanced-learn",
     "pandas",
     "numpy",
+    "requests",
+    "scipy",
+    "h3",
+    "pyshp",
 )
 image = image.add_local_file(
     local_path=SOLAR_MODEL_FILE,
@@ -39,6 +53,14 @@ image = image.add_local_file(
 image = image.add_local_file(
     local_path=WIND_MODEL_FILE,
     remote_path=FALLBACK_WIND_MODEL_PATH,
+)
+image = image.add_local_file(
+    local_path=CHANCE_MODEL_FILE,
+    remote_path=FALLBACK_CHANCE_MODEL_PATH,
+)
+image = image.add_local_dir(
+    local_path=FEATURE_EXPORT_DIR,
+    remote_path=str(SEED_FEATURE_EXPORT_DIR),
 )
 
 volume = modal.Volume.from_name("energy-models", create_if_missing=True)
@@ -81,6 +103,32 @@ DEFAULT_ELEVATION_METERS = 0.0
 DEFAULT_SAMPLE_COUNT = 10_000
 MIN_MODEL_PROBABILITY = 0.05
 HOURS_PER_YEAR = 8760.0
+H3_RESOLUTION = 8
+CHANCE_MODEL_FEATURE_COLUMNS = [
+    "elevation",
+    "slope",
+    "aspect",
+    "roughness",
+    "landcover",
+    "population_density",
+    "h3_dist_to_major_road_km",
+]
+CACHED_HEX_FEATURE_COLUMNS = [
+    "elevation",
+    "slope",
+    "aspect",
+    "roughness",
+    "landcover",
+    "population_density",
+]
+ROADS_DATA_DIR = Path("/tmp/renewably_roads")
+ROADS_SHAPEFILE_PATH = ROADS_DATA_DIR / "tl_2023_us_primaryroads.shp"
+ROAD_ZIP_URL = (
+    "https://www2.census.gov/geo/tiger/TIGER2023/PRIMARYROADS/"
+    "tl_2023_us_primaryroads.zip"
+)
+DEFAULT_CHANCE_CLASS_ORDER = ("none", "solar", "wind")
+DEFAULT_ROAD_DISTANCE_KM = 10.0
 
 
 def jm2_to_kwh(irradiation_jm2: float) -> float:
@@ -158,6 +206,10 @@ class BoundingBoxRequest(BaseModel):
     ymax: float
 
 
+class PolygonRequest(BaseModel):
+    rings: list[list[list[float]]]
+
+
 class SolarRequest(BaseModel):
     lat: float
     lon: float
@@ -174,26 +226,353 @@ class OptimizationRequest(BaseModel):
     mode: Literal["cash", "power"]
     target_value: float = Field(gt=0)
     bounding_box: BoundingBoxRequest
+    polygon: PolygonRequest | None = None
     sample_count: int = Field(default=DEFAULT_SAMPLE_COUNT, ge=100, le=10_000)
     elevation: float = Field(default=DEFAULT_ELEVATION_METERS)
+
+
+def _point_in_ring(lon: float, lat: float, ring: list[list[float]]) -> bool:
+    inside = False
+    if len(ring) < 3:
+        return False
+
+    previous_lon, previous_lat = ring[-1][0], ring[-1][1]
+    for current_lon, current_lat, *_ in ring:
+        intersects = ((current_lat > lat) != (previous_lat > lat)) and (
+            lon
+            < (previous_lon - current_lon) * (lat - current_lat)
+            / ((previous_lat - current_lat) or 1e-12)
+            + current_lon
+        )
+        if intersects:
+            inside = not inside
+        previous_lon, previous_lat = current_lon, current_lat
+
+    return inside
+
+
+def _point_in_polygon(lon: float, lat: float, polygon: PolygonRequest) -> bool:
+    if not polygon.rings:
+        return False
+
+    exterior = polygon.rings[0]
+    if not _point_in_ring(lon, lat, exterior):
+        return False
+
+    for hole in polygon.rings[1:]:
+        if _point_in_ring(lon, lat, hole):
+            return False
+
+    return True
 
 
 def _sample_points_in_bbox(
     bounding_box: BoundingBoxRequest,
     sample_count: int,
     elevation: float,
+    polygon: PolygonRequest | None = None,
 ) -> pd.DataFrame:
     rng = np.random.default_rng()
-    lons = rng.uniform(bounding_box.xmin, bounding_box.xmax, sample_count)
-    lats = rng.uniform(bounding_box.ymin, bounding_box.ymax, sample_count)
+    if polygon is None:
+        lons = rng.uniform(bounding_box.xmin, bounding_box.xmax, sample_count)
+        lats = rng.uniform(bounding_box.ymin, bounding_box.ymax, sample_count)
+
+        return pd.DataFrame(
+            {
+                "lat": lats,
+                "lon": lons,
+                "elevation": np.full(sample_count, elevation, dtype=float),
+            }
+        )
+
+    accepted_lons: list[float] = []
+    accepted_lats: list[float] = []
+    batch_size = max(512, min(sample_count * 2, 4096))
+
+    while len(accepted_lons) < sample_count:
+        candidate_lons = rng.uniform(bounding_box.xmin, bounding_box.xmax, batch_size)
+        candidate_lats = rng.uniform(bounding_box.ymin, bounding_box.ymax, batch_size)
+
+        for lon, lat in zip(candidate_lons, candidate_lats):
+            if _point_in_polygon(float(lon), float(lat), polygon):
+                accepted_lons.append(float(lon))
+                accepted_lats.append(float(lat))
+                if len(accepted_lons) >= sample_count:
+                    break
 
     return pd.DataFrame(
         {
-            "lat": lats,
-            "lon": lons,
+            "lat": np.array(accepted_lats, dtype=float),
+            "lon": np.array(accepted_lons, dtype=float),
             "elevation": np.full(sample_count, elevation, dtype=float),
         }
     )
+
+
+def _load_h3():
+    import h3
+
+    return h3
+
+
+def _bbox_to_h3_cells(bounding_box: BoundingBoxRequest) -> list[str]:
+    h3 = _load_h3()
+    outer_ring = [
+        (bounding_box.ymin, bounding_box.xmin),
+        (bounding_box.ymin, bounding_box.xmax),
+        (bounding_box.ymax, bounding_box.xmax),
+        (bounding_box.ymax, bounding_box.xmin),
+    ]
+    polygon = h3.LatLngPoly(outer_ring)
+    return sorted(h3.polygon_to_cells(polygon, res=H3_RESOLUTION))
+
+
+def _selection_to_h3_cells(
+    bounding_box: BoundingBoxRequest,
+    polygon: PolygonRequest | None = None,
+) -> list[str]:
+    h3 = _load_h3()
+    if polygon is None or not polygon.rings:
+        return _bbox_to_h3_cells(bounding_box)
+
+    exterior = [(lat, lon) for lon, lat, *_ in polygon.rings[0]]
+    holes = [
+        [(lat, lon) for lon, lat, *_ in ring]
+        for ring in polygon.rings[1:]
+    ]
+    return sorted(h3.polygon_to_cells(h3.LatLngPoly(exterior, *holes), res=H3_RESOLUTION))
+
+
+def _point_h3_indices(points: pd.DataFrame) -> np.ndarray:
+    h3 = _load_h3()
+    return np.array(
+        [
+            h3.latlng_to_cell(float(lat), float(lon), H3_RESOLUTION)
+            for lat, lon in zip(points["lat"], points["lon"])
+        ],
+        dtype=object,
+    )
+
+
+@lru_cache(maxsize=1)
+def _load_feature_cache() -> pd.DataFrame:
+    csv_paths = sorted(SEED_FEATURE_EXPORT_DIR.glob("gee_features_*.csv"))
+    if not csv_paths:
+        raise FileNotFoundError(
+            f"No cached H3 feature exports were found in {SEED_FEATURE_EXPORT_DIR}."
+        )
+
+    frames: list[pd.DataFrame] = []
+    for csv_path in csv_paths:
+        frame = pd.read_csv(
+            csv_path,
+            usecols=["h3_index", *CACHED_HEX_FEATURE_COLUMNS],
+            dtype={"h3_index": str},
+        )
+        frames.append(frame)
+
+    cache = pd.concat(frames, ignore_index=True).drop_duplicates(
+        subset=["h3_index"],
+        keep="last",
+    )
+    for column in CACHED_HEX_FEATURE_COLUMNS:
+        cache[column] = pd.to_numeric(cache[column], errors="coerce")
+    return cache
+
+
+@lru_cache(maxsize=1)
+def _feature_cache_medians() -> dict[str, float]:
+    cache = _load_feature_cache()
+    medians = cache[CACHED_HEX_FEATURE_COLUMNS].median(numeric_only=True).to_dict()
+    return {
+        column: float(medians.get(column, 0.0) or 0.0)
+        for column in CACHED_HEX_FEATURE_COLUMNS
+    }
+
+
+@lru_cache(maxsize=1)
+def _feature_cache_index() -> tuple[pd.DataFrame, object]:
+    from scipy.spatial import cKDTree
+
+    h3 = _load_h3()
+    cache = _load_feature_cache().copy()
+    centroids = np.array(
+        [h3.cell_to_latlng(h3_index) for h3_index in cache["h3_index"]],
+        dtype=float,
+    )
+    tree = cKDTree(np.radians(centroids))
+    indexed = cache.set_index("h3_index", drop=False)
+    return indexed, tree
+
+
+@lru_cache(maxsize=1)
+def _road_vertex_tree():
+    import shapefile
+    from scipy.spatial import cKDTree
+
+    ROADS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not ROADS_SHAPEFILE_PATH.exists():
+        zip_path = ROADS_DATA_DIR / "roads.zip"
+        response = requests.get(ROAD_ZIP_URL, timeout=120)
+        response.raise_for_status()
+        zip_path.write_bytes(response.content)
+        with zipfile.ZipFile(zip_path, "r") as zip_file:
+            zip_file.extractall(ROADS_DATA_DIR)
+
+    reader = shapefile.Reader(str(ROADS_SHAPEFILE_PATH))
+    coords: list[tuple[float, float]] = []
+    for shape in reader.shapes():
+        coords.extend((float(lon), float(lat)) for lon, lat in shape.points)
+
+    if not coords:
+        raise ValueError(
+            f"No major-road coordinates were found in {ROADS_SHAPEFILE_PATH}."
+        )
+
+    coords_array = np.array(coords, dtype=float)
+    return cKDTree(np.radians(coords_array[:, ::-1]))
+
+
+def _road_distances_for_hexes(h3_indices: list[str]) -> dict[str, float]:
+    if not h3_indices:
+        return {}
+
+    h3 = _load_h3()
+    try:
+        road_tree = _road_vertex_tree()
+    except Exception:
+        return {
+            h3_index: DEFAULT_ROAD_DISTANCE_KM
+            for h3_index in h3_indices
+        }
+
+    centroids = np.array(
+        [h3.cell_to_latlng(h3_index) for h3_index in h3_indices],
+        dtype=float,
+    )
+    dists, _ = road_tree.query(np.radians(centroids))
+    dists_km = dists * 6371.0
+    return {
+        h3_index: float(dists_km[index])
+        for index, h3_index in enumerate(h3_indices)
+    }
+
+
+def _hex_feature_frame(h3_indices: list[str]) -> pd.DataFrame:
+    indexed_cache, tree = _feature_cache_index()
+    medians = _feature_cache_medians()
+    h3 = _load_h3()
+
+    records: list[dict] = []
+    for h3_index in h3_indices:
+        lat, lon = h3.cell_to_latlng(h3_index)
+        if h3_index in indexed_cache.index:
+            feature_row = indexed_cache.loc[h3_index, CACHED_HEX_FEATURE_COLUMNS]
+            source = "exact_cache"
+        else:
+            _, nearest_idx = tree.query(np.radians([[lat, lon]]), k=1)
+            feature_row = indexed_cache.iloc[int(nearest_idx[0])][
+                CACHED_HEX_FEATURE_COLUMNS
+            ]
+            source = "nearest_cache"
+
+        record = {
+            "h3_index": h3_index,
+            "lat": float(lat),
+            "lon": float(lon),
+            "feature_source": source,
+        }
+        for column in CACHED_HEX_FEATURE_COLUMNS:
+            value = feature_row[column]
+            record[column] = (
+                float(value)
+                if pd.notna(value)
+                else medians[column]
+            )
+        records.append(record)
+
+    frame = pd.DataFrame(records)
+    road_distances = _road_distances_for_hexes(h3_indices)
+    frame["h3_dist_to_major_road_km"] = frame["h3_index"].map(road_distances)
+    frame["h3_dist_to_major_road_km"] = frame["h3_dist_to_major_road_km"].fillna(
+        DEFAULT_ROAD_DISTANCE_KM
+    )
+    return frame
+
+
+def _normalize_class_name(value: object) -> str:
+    return str(value).strip().lower().replace("_", "").replace("-", "")
+
+
+def _resolve_chance_class_indices(classes: np.ndarray) -> dict[str, int]:
+    normalized = [_normalize_class_name(value) for value in classes]
+    mapping: dict[str, int] = {}
+    for index, value in enumerate(normalized):
+        if "solar" in value:
+            mapping["solar"] = index
+        elif "wind" in value:
+            mapping["wind"] = index
+        elif "none" in value:
+            mapping["none"] = index
+
+    if len(mapping) == 3:
+        return mapping
+
+    if len(classes) != 3:
+        raise ValueError(
+            f"Chance model must expose exactly 3 classes, received {list(classes)!r}."
+        )
+
+    fallback_order = [
+        _normalize_class_name(value)
+        for value in os.getenv(
+            "CHANCE_MODEL_CLASS_ORDER",
+            ",".join(DEFAULT_CHANCE_CLASS_ORDER),
+        ).split(",")
+        if value.strip()
+    ]
+    if len(fallback_order) != 3:
+        fallback_order = list(DEFAULT_CHANCE_CLASS_ORDER)
+
+    return {
+        fallback_order[index]: index
+        for index in range(3)
+    }
+
+
+def _infer_device_probabilities(
+    chance_model,
+    point_h3_indices: np.ndarray,
+    hex_feature_frame: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    feature_inputs = hex_feature_frame[CHANCE_MODEL_FEATURE_COLUMNS]
+    probability_matrix = np.asarray(chance_model.predict_proba(feature_inputs), dtype=float)
+    class_indices = _resolve_chance_class_indices(np.asarray(chance_model.classes_))
+
+    hex_probabilities: dict[str, tuple[float, float, float]] = {}
+    for row_index, h3_index in enumerate(hex_feature_frame["h3_index"]):
+        solar_probability = float(probability_matrix[row_index, class_indices["solar"]])
+        wind_probability = float(probability_matrix[row_index, class_indices["wind"]])
+        none_probability = float(probability_matrix[row_index, class_indices["none"]])
+        hex_probabilities[h3_index] = (
+            solar_probability,
+            wind_probability,
+            none_probability,
+        )
+
+    solar_probabilities = np.array(
+        [hex_probabilities[h3_index][0] for h3_index in point_h3_indices],
+        dtype=float,
+    )
+    wind_probabilities = np.array(
+        [hex_probabilities[h3_index][1] for h3_index in point_h3_indices],
+        dtype=float,
+    )
+    none_probabilities = np.array(
+        [hex_probabilities[h3_index][2] for h3_index in point_h3_indices],
+        dtype=float,
+    )
+    return solar_probabilities, wind_probabilities, none_probabilities
 
 
 def _convert_solar_to_power_kwh(solar_values: np.ndarray) -> np.ndarray:
@@ -226,15 +605,6 @@ def _convert_wind_to_power_kwh(wind_values: np.ndarray) -> np.ndarray:
         dtype=float,
     )
 
-
-def _infer_device_probabilities(
-    solar_power_kwh: np.ndarray,
-    wind_power_kwh: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    ones = np.ones_like(solar_power_kwh, dtype=float)
-    return ones, ones.copy(), ones.copy()
-
-
 def _summarize_array(values: np.ndarray) -> dict[str, float]:
     return {
         "min": float(np.min(values)),
@@ -250,7 +620,9 @@ def _build_debug_stats(
     wind_power_kwh: np.ndarray,
     solar_probabilities: np.ndarray,
     wind_probabilities: np.ndarray,
+    none_probabilities: np.ndarray,
     budget_usd: float | None = None,
+    hex_count: int | None = None,
 ) -> dict:
     solar_expected = solar_probabilities * solar_power_kwh
     wind_expected = wind_probabilities * wind_power_kwh
@@ -308,6 +680,12 @@ def _build_debug_stats(
             "solar": affordable_solar_count,
             "wind": affordable_wind_count,
         },
+        "chance_model": {
+            "hex_count": hex_count,
+            "solar_probability": _summarize_array(solar_probabilities),
+            "wind_probability": _summarize_array(wind_probabilities),
+            "none_probability": _summarize_array(none_probabilities),
+        },
         "score_comparison": {
             "solar_wins": int(np.count_nonzero(solar_score > wind_score)),
             "wind_wins": int(np.count_nonzero(wind_score > solar_score)),
@@ -332,6 +710,7 @@ def _select_budget_points(
     wind_power_kwh: np.ndarray,
     solar_probabilities: np.ndarray,
     wind_probabilities: np.ndarray,
+    none_probabilities: np.ndarray,
     budget_usd: float,
 ) -> tuple[list[dict], float, float, float]:
     candidates: list[dict] = []
@@ -359,11 +738,14 @@ def _select_budget_points(
                 {
                     "lat": float(row["lat"]),
                     "lon": float(row["lon"]),
+                    "h3_index": str(row.get("h3_index", "")),
                     "device_type": "solar",
                     "solar_power_kwh": float(solar_power_kwh[index]),
                     "wind_power_kwh": float(wind_power_kwh[index]),
                     "solar_probability": float(solar_probabilities[index]),
                     "wind_probability": float(wind_probabilities[index]),
+                    "none_probability": float(none_probabilities[index]),
+                    "chance_feature_source": str(row.get("chance_feature_source", "")),
                     "expected_power_kwh": float(solar_expected),
                     "device_cost_usd": SOLAR_LIFETIME_COST_USD_PER_KWAC,
                     "installed_capacity_kw": OPTIMIZATION_BUILD_BLOCK_KW,
@@ -375,11 +757,14 @@ def _select_budget_points(
                 {
                     "lat": float(row["lat"]),
                     "lon": float(row["lon"]),
+                    "h3_index": str(row.get("h3_index", "")),
                     "device_type": "wind",
                     "solar_power_kwh": float(solar_power_kwh[index]),
                     "wind_power_kwh": float(wind_power_kwh[index]),
                     "solar_probability": float(solar_probabilities[index]),
                     "wind_probability": float(wind_probabilities[index]),
+                    "none_probability": float(none_probabilities[index]),
+                    "chance_feature_source": str(row.get("chance_feature_source", "")),
                     "expected_power_kwh": float(wind_expected),
                     "device_cost_usd": WIND_LIFETIME_COST_USD_PER_KW,
                     "installed_capacity_kw": OPTIMIZATION_BUILD_BLOCK_KW,
@@ -415,6 +800,7 @@ def _select_power_points(
     wind_power_kwh: np.ndarray,
     solar_probabilities: np.ndarray,
     wind_probabilities: np.ndarray,
+    none_probabilities: np.ndarray,
     target_power_kwh: float,
 ) -> tuple[list[dict], float, float, float]:
     candidates: list[dict] = []
@@ -445,11 +831,14 @@ def _select_power_points(
                 {
                     "lat": float(row["lat"]),
                     "lon": float(row["lon"]),
+                    "h3_index": str(row.get("h3_index", "")),
                     "device_type": "solar",
                     "solar_power_kwh": float(solar_power_kwh[index]),
                     "wind_power_kwh": float(wind_power_kwh[index]),
                     "solar_probability": float(solar_probabilities[index]),
                     "wind_probability": float(wind_probabilities[index]),
+                    "none_probability": float(none_probabilities[index]),
+                    "chance_feature_source": str(row.get("chance_feature_source", "")),
                     "effective_cost_usd": float(solar_effective_cost),
                     "device_cost_usd": SOLAR_LIFETIME_COST_USD_PER_KWAC,
                     "installed_capacity_kw": OPTIMIZATION_BUILD_BLOCK_KW,
@@ -462,11 +851,14 @@ def _select_power_points(
                 {
                     "lat": float(row["lat"]),
                     "lon": float(row["lon"]),
+                    "h3_index": str(row.get("h3_index", "")),
                     "device_type": "wind",
                     "solar_power_kwh": float(solar_power_kwh[index]),
                     "wind_power_kwh": float(wind_power_kwh[index]),
                     "solar_probability": float(solar_probabilities[index]),
                     "wind_probability": float(wind_probabilities[index]),
+                    "none_probability": float(none_probabilities[index]),
+                    "chance_feature_source": str(row.get("chance_feature_source", "")),
                     "effective_cost_usd": float(wind_effective_cost),
                     "device_cost_usd": WIND_LIFETIME_COST_USD_PER_KW,
                     "installed_capacity_kw": OPTIMIZATION_BUILD_BLOCK_KW,
@@ -511,9 +903,15 @@ class ModelService:
             if Path(VOLUME_WIND_MODEL_PATH).exists()
             else FALLBACK_WIND_MODEL_PATH
         )
+        chance_model_path = (
+            VOLUME_CHANCE_MODEL_PATH
+            if Path(VOLUME_CHANCE_MODEL_PATH).exists()
+            else FALLBACK_CHANCE_MODEL_PATH
+        )
 
         self.solar_model = joblib.load(solar_model_path)
         self.wind_model = joblib.load(wind_model_path)
+        self.chance_model = joblib.load(chance_model_path)
 
     @modal.method()
     def predict_solar(self, lat: float, lon: float, elevation: float):
@@ -533,13 +931,26 @@ class ModelService:
         mode: Literal["cash", "power"],
         target_value: float,
         bounding_box: dict,
+        polygon: dict | None = None,
         sample_count: int = DEFAULT_SAMPLE_COUNT,
         elevation: float = DEFAULT_ELEVATION_METERS,
     ):
+        bbox = BoundingBoxRequest(**bounding_box)
+        selection_polygon = PolygonRequest(**polygon) if polygon else None
         points = _sample_points_in_bbox(
-            BoundingBoxRequest(**bounding_box),
+            bbox,
             sample_count,
             elevation,
+            selection_polygon,
+        )
+        point_h3_indices = _point_h3_indices(points)
+        bbox_h3_indices = _selection_to_h3_cells(bbox, selection_polygon)
+        relevant_h3_indices = sorted(set(bbox_h3_indices) | set(point_h3_indices.tolist()))
+        hex_features = _hex_feature_frame(relevant_h3_indices)
+        hex_feature_lookup = hex_features.set_index("h3_index")
+        points["h3_index"] = point_h3_indices
+        points["chance_feature_source"] = points["h3_index"].map(
+            hex_feature_lookup["feature_source"].to_dict()
         )
 
         model_inputs = points[["lat", "lon", "elevation"]]
@@ -549,8 +960,9 @@ class ModelService:
         solar_power_kwh = _convert_solar_to_power_kwh(solar_values)
         wind_power_kwh = _convert_wind_to_power_kwh(wind_values)
         solar_probabilities, wind_probabilities, none_probabilities = _infer_device_probabilities(
-            solar_power_kwh,
-            wind_power_kwh,
+            self.chance_model,
+            point_h3_indices,
+            hex_features,
         )
         debug_stats = _build_debug_stats(
             solar_values,
@@ -559,7 +971,9 @@ class ModelService:
             wind_power_kwh,
             solar_probabilities,
             wind_probabilities,
+            none_probabilities,
             target_value if mode == "cash" else None,
+            len(relevant_h3_indices),
         )
         print(
             "Optimization debug:",
@@ -581,6 +995,7 @@ class ModelService:
                 wind_power_kwh,
                 solar_probabilities,
                 wind_probabilities,
+                none_probabilities,
                 target_value,
             )
             return {
@@ -599,7 +1014,9 @@ class ModelService:
                 "total_expected_power_kwh": total_expected_power,
                 "selected_count": len(selected_points),
                 "points": selected_points,
-                "third_model": "stub_probability_model",
+                "third_model": "chance_model_h3_hex_probabilities",
+                "hex_resolution": H3_RESOLUTION,
+                "hex_count": len(relevant_h3_indices),
                 "debug": debug_stats,
             }
 
@@ -609,6 +1026,7 @@ class ModelService:
             wind_power_kwh,
             solar_probabilities,
             wind_probabilities,
+            none_probabilities,
             target_value,
         )
         return {
@@ -627,7 +1045,9 @@ class ModelService:
             "total_actual_cost_usd": total_actual_cost,
             "selected_count": len(selected_points),
             "points": selected_points,
-            "third_model": "stub_probability_model",
+            "third_model": "chance_model_h3_hex_probabilities",
+            "hex_resolution": H3_RESOLUTION,
+            "hex_count": len(relevant_h3_indices),
             "debug": debug_stats,
         }
 
@@ -671,6 +1091,7 @@ async def optimize(req: OptimizationRequest):
             req.mode,
             req.target_value,
             req.bounding_box.model_dump(),
+            req.polygon.model_dump() if req.polygon is not None else None,
             req.sample_count,
             req.elevation,
         )

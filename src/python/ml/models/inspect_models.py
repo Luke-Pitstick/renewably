@@ -6,6 +6,7 @@ MODEL_DIR = Path(__file__).resolve().parent
 MODEL_PATHS = [
     MODEL_DIR / "solar_xgboost_model.pkl",
     MODEL_DIR / "wind_xgboost_model.pkl",
+    MODEL_DIR / "chance_model.pkl",
 ]
 
 

@@ -33,6 +33,9 @@ type ArcGISMapProps = {
     xmax: number
     ymax: number
   } | null) => void
+  onSelectionPolygonSelect: (polygon: {
+    rings: number[][][]
+  } | null) => void
 }
 
 type ThemeLayerKind =
@@ -73,6 +76,7 @@ type GraphicsLayerHandle = {
 type GraphicHandle = {
   geometry?: {
     extent?: NumericBbox
+    rings?: number[][][]
   }
 }
 
@@ -1169,6 +1173,7 @@ export const ArcGISMap = memo(function ArcGISMap({
   locationSearchRequest,
   onBoundingBoxSelectionChange,
   onBoundingBoxSelect,
+  onSelectionPolygonSelect,
 }: ArcGISMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null)
   const windCanvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -1279,22 +1284,34 @@ export const ArcGISMap = memo(function ArcGISMap({
 
     if (!extent) {
       onBoundingBoxSelect(null)
+      onSelectionPolygonSelect(null)
       return
     }
 
-    const geographicExtent = coreModules?.webMercatorUtils
+    const geographicGeometry = coreModules?.webMercatorUtils
       ? (coreModules.webMercatorUtils.webMercatorToGeographic(
-          extent as unknown as Record<string, unknown>,
-        ) as NumericBbox)
-      : extent
+          graphic?.geometry as unknown as Record<string, unknown>,
+        ) as NumericBbox & { rings?: number[][][] })
+      : (graphic?.geometry as NumericBbox & { rings?: number[][][] } | undefined)
+
+    const geographicExtent = (
+      geographicGeometry &&
+      typeof geographicGeometry === 'object' &&
+      'extent' in geographicGeometry &&
+      geographicGeometry.extent
+        ? geographicGeometry.extent
+        : geographicGeometry
+    ) as NumericBbox | undefined
 
     if (
+      !geographicExtent ||
       typeof geographicExtent.xmin !== 'number' ||
       typeof geographicExtent.ymin !== 'number' ||
       typeof geographicExtent.xmax !== 'number' ||
       typeof geographicExtent.ymax !== 'number'
     ) {
       onBoundingBoxSelect(null)
+      onSelectionPolygonSelect(null)
       return
     }
 
@@ -1304,7 +1321,31 @@ export const ArcGISMap = memo(function ArcGISMap({
       xmax: geographicExtent.xmax,
       ymax: geographicExtent.ymax,
     })
-  }, [onBoundingBoxSelect])
+
+    const rings = geographicGeometry?.rings
+    if (
+      Array.isArray(rings) &&
+      rings.every(
+        (ring) =>
+          Array.isArray(ring) &&
+          ring.every(
+            (coordinate) =>
+              Array.isArray(coordinate) &&
+              coordinate.length >= 2 &&
+              typeof coordinate[0] === 'number' &&
+              typeof coordinate[1] === 'number',
+          ),
+      )
+    ) {
+      onSelectionPolygonSelect({
+        rings: rings.map((ring) =>
+          ring.map((coordinate) => [coordinate[0], coordinate[1]]),
+        ),
+      })
+    } else {
+      onSelectionPolygonSelect(null)
+    }
+  }, [onBoundingBoxSelect, onSelectionPolygonSelect])
 
   const beginSelectionEdit = useCallback(() => {
     if (!selectionGraphicRef.current || !sketchViewModelRef.current) {
@@ -1759,13 +1800,14 @@ export const ArcGISMap = memo(function ArcGISMap({
       selectionGraphicRef.current = null
       onBoundingBoxSelectionChange(false)
       onBoundingBoxSelect(null)
+      onSelectionPolygonSelect(null)
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onBoundingBoxSelect, onBoundingBoxSelectionChange])
+  }, [onBoundingBoxSelect, onBoundingBoxSelectionChange, onSelectionPolygonSelect])
 
   useEffect(() => {
     if (!locationSearchRequest || !viewRef.current) {

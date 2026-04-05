@@ -11,6 +11,10 @@ type BoundingBox = {
   ymax: number
 }
 
+type SelectionPolygon = {
+  rings: number[][][]
+}
+
 type LocationSearchRequest = {
   id: number
   query: string
@@ -71,6 +75,8 @@ function App() {
   const [boundingBoxSelectionActive, setBoundingBoxSelectionActive] =
     useState(false)
   const [boundingBox, setBoundingBox] = useState<BoundingBox | null>(null)
+  const [selectionPolygon, setSelectionPolygon] =
+    useState<SelectionPolygon | null>(null)
   const [locationQuery, setLocationQuery] = useState('')
   const [locationSearchRequest, setLocationSearchRequest] =
     useState<LocationSearchRequest | null>(null)
@@ -128,6 +134,7 @@ function App() {
     setOptimizationValue('')
     setBoundingBoxSelectionActive(false)
     setBoundingBox(null)
+    setSelectionPolygon(null)
     setOptimizationPanelOpen(false)
   }
 
@@ -149,6 +156,7 @@ function App() {
           mode: optimizationMode,
           target_value: optimizationTargetValue,
           bounding_box: boundingBox,
+          polygon: selectionPolygon,
         }),
       })
 
@@ -219,6 +227,7 @@ function App() {
           </div>
 
           <ArcGISMap
+            topographyVisible={false}
             solarVisible={solarVisible}
             windVisible={windVisible}
             solarFarmsVisible={solarFarmsVisible}
@@ -231,6 +240,7 @@ function App() {
             editSelectionRequest={editSelectionRequest}
             onBoundingBoxSelectionChange={setBoundingBoxSelectionActive}
             onBoundingBoxSelect={setBoundingBox}
+            onSelectionPolygonSelect={setSelectionPolygon}
             locationSearchRequest={locationSearchRequest}
           />
 
