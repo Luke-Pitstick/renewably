@@ -233,7 +233,7 @@ const WIND_RECOVERY_MS = 450
 const scalarGridCache = new Map<string, Promise<ScalarGrid>>()
 const LOWER_48_VIEW = {
   center: [-98.2, 38.5] as [number, number],
-  zoom: 5.15,
+  zoom: 4.55,
 }
 
 let coreModulesPromise: Promise<CoreModules> | null = null

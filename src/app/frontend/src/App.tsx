@@ -3,7 +3,6 @@ import './App.css'
 import { ArcGISMap } from './ArcGISMap'
 
 type OptimizationMode = 'cash' | 'power'
-type SidebarSectionKey = 'optimization' | 'layers'
 
 type BoundingBox = {
   xmin: number
@@ -51,39 +50,7 @@ type OptimizationResponse = {
   total_raw_power_kwh?: number
   total_effective_cost_usd?: number
   power_basis?: string
-  power_window_hours?: number
   points?: OptimizationPoint[]
-  debug?: {
-    raw_predictions: {
-      solar: { min: number; max: number; mean: number }
-      wind: { min: number; max: number; mean: number }
-    }
-    converted_power_kwh: {
-      solar: { min: number; max: number; mean: number }
-      wind: { min: number; max: number; mean: number }
-    }
-    positive_counts: {
-      solar_predictions: number
-      wind_predictions: number
-      solar_power: number
-      wind_power: number
-      solar_expected_power: number
-      wind_expected_power: number
-    }
-    affordable_counts: {
-      solar: number | null
-      wind: number | null
-    }
-    score_comparison: {
-      solar_wins: number
-      wind_wins: number
-      ties: number
-      solar_score: { min: number; max: number; mean: number }
-      wind_score: { min: number; max: number; mean: number }
-      top_solar_scores: number[]
-      top_wind_scores: number[]
-    }
-  }
 }
 
 const API_BASE_URL =
@@ -96,12 +63,8 @@ function App() {
   const [solarFarmsVisible, setSolarFarmsVisible] = useState(false)
   const [windFarmsVisible, setWindFarmsVisible] = useState(false)
   const [powerLinesVisible, setPowerLinesVisible] = useState(false)
-  const [openSections, setOpenSections] = useState<
-    Record<SidebarSectionKey, boolean>
-  >({
-    optimization: true,
-    layers: true,
-  })
+  const [optimizationPanelOpen, setOptimizationPanelOpen] = useState(false)
+  const [layerMenuOpen, setLayerMenuOpen] = useState(false)
   const [optimizationMode, setOptimizationMode] =
     useState<OptimizationMode>('cash')
   const [optimizationValue, setOptimizationValue] = useState('')
@@ -119,19 +82,21 @@ function App() {
     useState<OptimizationResponse | null>(null)
   const [optimizationFocusRequest, setOptimizationFocusRequest] =
     useState<OptimizationFocusRequest | null>(null)
+
   const activeLayerCount =
     Number(solarVisible) +
     Number(windVisible) +
     Number(solarFarmsVisible) +
     Number(windFarmsVisible) +
     Number(powerLinesVisible)
+
   const inputLabel =
     optimizationMode === 'cash' ? 'Available budget' : 'Target power need'
   const inputPlaceholder =
     optimizationMode === 'cash' ? 'Enter max budget' : 'Enter required power'
   const inputUnit = optimizationMode === 'cash' ? 'USD' : 'kWh'
   const boundingBoxSummary = boundingBox
-    ? 'Area selected on map'
+    ? 'Polygon selected on map'
     : 'No area selected'
   const hasBoundingBox = boundingBox !== null
   const optimizationTargetValue = Number(optimizationValue)
@@ -140,12 +105,6 @@ function App() {
     Number.isFinite(optimizationTargetValue) &&
     optimizationTargetValue > 0 &&
     !optimizationSubmitting
-  const toggleSection = (section: SidebarSectionKey) => {
-    setOpenSections((current) => ({
-      ...current,
-      [section]: !current[section],
-    }))
-  }
 
   const submitLocationSearch = () => {
     const query = locationQuery.trim()
@@ -161,7 +120,7 @@ function App() {
     })
   }
 
-  const closeOptimizationResults = () => {
+  const resetOptimizationWorkflow = () => {
     setOptimizationResult(null)
     setOptimizationFocusRequest(null)
     setOptimizationStatusMessage('')
@@ -169,6 +128,7 @@ function App() {
     setOptimizationValue('')
     setBoundingBoxSelectionActive(false)
     setBoundingBox(null)
+    setOptimizationPanelOpen(false)
   }
 
   const submitOptimizationRequest = async () => {
@@ -203,12 +163,12 @@ function App() {
         id: Date.now(),
         boundingBox,
       })
-      const summary =
+      setOptimizationPanelOpen(false)
+      setOptimizationStatusMessage(
         optimizationMode === 'cash'
           ? `${result.selected_count} sites selected · expected output ${Math.round(result.total_expected_power_kwh ?? 0).toLocaleString()} kWh`
-          : `${result.selected_count} sites selected · actual cost ${Math.round(result.total_actual_cost_usd ?? 0).toLocaleString()} USD`
-
-      setOptimizationStatusMessage(summary)
+          : `${result.selected_count} sites selected · total output ${Math.round(result.total_power_kwh ?? 0).toLocaleString()} kWh`,
+      )
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Optimization request failed'
@@ -220,310 +180,43 @@ function App() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <header className="sidebar-header">
-          <div className="brand-block">
-            <div className="brand-block-text">
-              <p className="eyebrow">Renewably</p>
-              <h1>Grid intelligence</h1>
-            </div>
-          </div>
-        </header>
-
-        <div className="sidebar-body">
-          <div className="sidebar-section-eyebrow" aria-hidden="true">
-            Tools
-          </div>
-
-          <section
-            className={
-              openSections.optimization
-                ? 'sidebar-panel sidebar-panel--optimization sidebar-panel--expanded'
-                : 'sidebar-panel sidebar-panel--optimization'
-            }
-          >
-            <button
-              type="button"
-              className="sidebar-panel-toggle"
-              aria-expanded={openSections.optimization}
-              aria-controls="sidebar-optimization-panel"
-              onClick={() => toggleSection('optimization')}
-            >
-              <div className="sidebar-panel-heading">
-                <div className="sidebar-panel-title-group">
-                  <p className="panel-label">Optimization</p>
-                  <span className="badge">Draft</span>
-                </div>
-                <span
-                  className={
-                    openSections.optimization
-                      ? 'panel-toggle-icon panel-toggle-icon-open'
-                      : 'panel-toggle-icon'
-                  }
-                  aria-hidden="true"
-                />
-              </div>
-            </button>
-
-            {openSections.optimization ? (
-              <div
-                id="sidebar-optimization-panel"
-                className="sidebar-panel-content"
-              >
-                <div
-                  className="mode-switch"
-                  role="tablist"
-                  aria-label="Optimization mode"
-                >
-                <button
-                  type="button"
-                  className={
-                    optimizationMode === 'cash'
-                      ? 'mode-button active'
-                      : 'mode-button'
-                  }
-                  onClick={() => setOptimizationMode('cash')}
-                >
-                  Cash optimization
-                </button>
-                <button
-                  type="button"
-                  className={
-                    optimizationMode === 'power'
-                      ? 'mode-button active'
-                      : 'mode-button'
-                  }
-                  onClick={() => setOptimizationMode('power')}
-                >
-                  Power optimization
-                </button>
-              </div>
-
-              <label className="input-block">
-                <span>{inputLabel}</span>
-                <div className="input-row">
-                  <input
-                    type="text"
-                    value={optimizationValue}
-                    onChange={(event) => setOptimizationValue(event.target.value)}
-                    placeholder={inputPlaceholder}
-                  />
-                  <span className="input-unit">{inputUnit}</span>
-                </div>
-              </label>
-
-              <div className="selection-summary">
-                <span className="panel-label">Selected bounds</span>
-                <p className="selection-hint">
-                  Click to trace corners, then drag or edit the finished shape.
-                </p>
-                <strong>{boundingBoxSummary}</strong>
-              </div>
-
-              <div className="action-stack">
-                <button
-                  type="button"
-                  className={
-                    boundingBoxSelectionActive
-                      ? 'sidebar-action active'
-                      : 'sidebar-action'
-                  }
-                  onClick={() =>
-                    setBoundingBoxSelectionActive((current) => !current)
-                  }
-                >
-                  {boundingBoxSelectionActive
-                    ? 'Cancel Area Drawing'
-                    : 'Draw Selection Area'}
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-action"
-                  disabled={!hasBoundingBox}
-                  onClick={() => {
-                    if (!hasBoundingBox) {
-                      return
-                    }
-
-                    startTransition(() => {
-                      setBoundingBoxSelectionActive(false)
-                      setEditSelectionRequest({
-                        id: Date.now(),
-                      })
-                    })
-                  }}
-                >
-                  Edit Selection
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-action sidebar-action-danger"
-                  disabled={!hasBoundingBox}
-                  onClick={() => {
-                    startTransition(() => {
-                      setBoundingBoxSelectionActive(false)
-                      setBoundingBox(null)
-                    })
-                  }}
-                >
-                  Delete Selection
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-submit"
-                  disabled={!canSubmitOptimization}
-                  onClick={() => {
-                    void submitOptimizationRequest()
-                  }}
-                >
-                  {optimizationSubmitting
-                    ? 'Submitting...'
-                    : 'Submit Optimization Request'}
-                </button>
-                </div>
-                <p className="optimization-status">{optimizationStatusMessage}</p>
-              </div>
-            ) : null}
-          </section>
-
-          <section className="sidebar-panel sidebar-panel--layers">
-            <button
-              type="button"
-              className="sidebar-panel-toggle"
-              aria-expanded={openSections.layers}
-              aria-controls="sidebar-layers-panel"
-              onClick={() => toggleSection('layers')}
-            >
-              <div className="sidebar-panel-heading">
-                <div className="sidebar-panel-title-group">
-                  <p className="panel-label">Map layers</p>
-                  <span className="badge">{activeLayerCount} active</span>
-                </div>
-                <span
-                  className={
-                    openSections.layers
-                      ? 'panel-toggle-icon panel-toggle-icon-open'
-                      : 'panel-toggle-icon'
-                  }
-                  aria-hidden="true"
-                />
-              </div>
-            </button>
-
-            {openSections.layers ? (
-              <div
-                id="sidebar-layers-panel"
-                className="sidebar-panel-content"
-                aria-label="Map layers"
-              >
-                <div className="sidebar-layer-list">
-                  <label className="sidebar-layer-card">
-                    <div className="sidebar-layer-card-text">
-                      <strong>Solar irradiation</strong>
-                      <p>Estimated solar resource intensity across the US</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={solarVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setSolarVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-                  <label className="sidebar-layer-card">
-                    <div className="sidebar-layer-card-text">
-                      <strong>Wind speed</strong>
-                      <p>Estimated wind resource intensity across the US</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={windVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setWindVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-                  <label className="sidebar-layer-card">
-                    <div className="sidebar-layer-card-text">
-                      <strong>Solar farm sites</strong>
-                      <p>Known solar farm locations across the US</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={solarFarmsVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setSolarFarmsVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-                  <label className="sidebar-layer-card">
-                    <div className="sidebar-layer-card-text">
-                      <strong>Wind farm sites</strong>
-                      <p>Known wind farm locations across the US</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={windFarmsVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setWindFarmsVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-                  <label className="sidebar-layer-card">
-                    <div className="sidebar-layer-card-text">
-                      <strong>Major power lines</strong>
-                      <p>Major electric transmission lines across the US</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={powerLinesVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setPowerLinesVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-                </div>
-              </div>
-            ) : null}
-          </section>
-        </div>
-      </aside>
-
       <section className="map-stage">
         <div className="map-frame">
-          <form
-            className="map-search"
-            onSubmit={(event) => {
-              event.preventDefault()
-              submitLocationSearch()
-            }}
-          >
-            <label className="map-search-field">
-              <span className="map-search-icon" aria-hidden="true">
-                ⌕
-              </span>
-              <input
-                type="text"
-                value={locationQuery}
-                onChange={(event) => setLocationQuery(event.target.value)}
-                placeholder="Search areas"
-                aria-label="Search areas"
-              />
-            </label>
-            <button type="submit" className="map-search-button">
-              Search
-            </button>
-          </form>
+          <div className="map-top-left">
+            <div className="brand-banner">
+              <div className="brand-mark" aria-hidden="true">
+                R
+              </div>
+              <div className="brand-copy">
+                <p className="eyebrow">Renewably Atlas</p>
+                <h1>Grid intelligence studio</h1>
+              </div>
+            </div>
+
+            <form
+              className="map-search"
+              onSubmit={(event) => {
+                event.preventDefault()
+                submitLocationSearch()
+              }}
+            >
+              <label className="map-search-field">
+                <span className="map-search-icon" aria-hidden="true">
+                  ⌕
+                </span>
+                <input
+                  type="text"
+                  value={locationQuery}
+                  onChange={(event) => setLocationQuery(event.target.value)}
+                  placeholder="Search city, state, or address"
+                  aria-label="Search city, state, or address"
+                />
+              </label>
+              <button type="submit" className="map-search-button">
+                Search
+              </button>
+            </form>
+          </div>
 
           <ArcGISMap
             solarVisible={solarVisible}
@@ -541,38 +234,323 @@ function App() {
             locationSearchRequest={locationSearchRequest}
           />
 
-          {solarVisible ? (
-            <div className="map-overlay overlay-legend">
-              <div className="legend-header">
-                <p className="panel-label">Solar irradiation</p>
-                <span className="legend-unit">kWh/m²/day</span>
-              </div>
-              <div className="legend-bar" aria-hidden="true" />
-              <div className="legend-values">
-                <span>Lower resource</span>
-                <span>Strong resource</span>
-                <span>Peak resource</span>
-              </div>
-            </div>
-          ) : null}
+          <div className="map-bottom-left">
+            <div className="map-bottom-left-row">
+              <div className="legend-stack">
+                {solarVisible ? (
+                  <div className="map-overlay overlay-legend overlay-legend-inline">
+                    <div className="legend-header">
+                      <p className="panel-label">Solar irradiation</p>
+                      <span className="legend-unit">kWh/m²/day</span>
+                    </div>
+                    <div className="legend-bar" aria-hidden="true" />
+                    <div className="legend-values">
+                      <span>Lower resource</span>
+                      <span>Strong resource</span>
+                      <span>Peak resource</span>
+                    </div>
+                  </div>
+                ) : null}
 
-          {windVisible ? (
-            <div
-              className={
-                solarVisible
-                  ? 'map-overlay overlay-legend overlay-legend-secondary'
-                  : 'map-overlay overlay-legend'
-              }
-            >
-              <div className="legend-header">
-                <p className="panel-label">Wind speed</p>
-                <span className="legend-unit">m/s</span>
+                {windVisible ? (
+                  <div className="map-overlay overlay-legend overlay-legend-inline">
+                    <div className="legend-header">
+                      <p className="panel-label">Wind speed</p>
+                      <span className="legend-unit">m/s</span>
+                    </div>
+                    <div className="legend-bar wind-legend-bar" aria-hidden="true" />
+                    <div className="legend-values">
+                      <span>Lower wind</span>
+                      <span>Strong wind</span>
+                      <span>Peak wind</span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-              <div className="legend-bar wind-legend-bar" aria-hidden="true" />
-              <div className="legend-values">
-                <span>Lower wind</span>
-                <span>Strong wind</span>
-                <span>Peak wind</span>
+
+              <button
+                type="button"
+                className="layer-menu-toggle"
+                onClick={() => setLayerMenuOpen((current) => !current)}
+                aria-expanded={layerMenuOpen}
+                aria-label="Toggle layer menu"
+              >
+                <span className="layer-menu-toggle-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="presentation">
+                    <path
+                      d="M12 3 4 7.4 12 11.8 20 7.4 12 3Z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M4 11.1 12 15.5 20 11.1"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M4 14.9 12 19.3 20 14.9"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className="layer-menu-toggle-count">{activeLayerCount}</span>
+              </button>
+            </div>
+
+            {layerMenuOpen ? (
+              <div className="map-overlay layer-dock">
+                <div className="legend-header">
+                  <div>
+                    <p className="panel-label">Map layers</p>
+                    <span className="legend-unit">{activeLayerCount} active</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="overlay-close-button"
+                    onClick={() => setLayerMenuOpen(false)}
+                    aria-label="Close layer menu"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="floating-layer-list">
+                  <label className="floating-layer-card">
+                    <div className="floating-layer-copy">
+                      <strong>Solar irradiation</strong>
+                      <p>Estimated solar resource intensity.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={solarVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setSolarVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+
+                  <label className="floating-layer-card">
+                    <div className="floating-layer-copy">
+                      <strong>Wind speed</strong>
+                      <p>Estimated wind resource intensity.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={windVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setWindVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+
+                  <label className="floating-layer-card">
+                    <div className="floating-layer-copy">
+                      <strong>Solar farm sites</strong>
+                      <p>Known solar farm locations.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={solarFarmsVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setSolarFarmsVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+
+                  <label className="floating-layer-card">
+                    <div className="floating-layer-copy">
+                      <strong>Wind farm sites</strong>
+                      <p>Known wind farm locations.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={windFarmsVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setWindFarmsVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+
+                  <label className="floating-layer-card">
+                    <div className="floating-layer-copy">
+                      <strong>Major power lines</strong>
+                      <p>Transmission line corridors.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={powerLinesVisible}
+                      onChange={() => {
+                        startTransition(() => {
+                          setPowerLinesVisible((current) => !current)
+                        })
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {optimizationPanelOpen ? (
+            <div className="map-overlay optimization-sheet">
+              <div className="legend-header overlay-results-header">
+                <div>
+                  <p className="panel-label">Renewably workflow</p>
+                  <h2 className="sheet-title">Optimization request</h2>
+                </div>
+                <button
+                  type="button"
+                  className="overlay-close-button"
+                  onClick={() => setOptimizationPanelOpen(false)}
+                  aria-label="Close optimization request"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="sheet-body">
+                <div className="sheet-section-head">
+                  <span className="panel-label">Mode selection</span>
+                  <span className="sheet-step">Step 1</span>
+                </div>
+                <div className="mode-switch" role="tablist" aria-label="Optimization mode">
+                  <button
+                    type="button"
+                    className={
+                      optimizationMode === 'cash'
+                        ? 'mode-button active'
+                        : 'mode-button'
+                    }
+                    onClick={() => setOptimizationMode('cash')}
+                  >
+                    Cash optimization
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      optimizationMode === 'power'
+                        ? 'mode-button active'
+                        : 'mode-button'
+                    }
+                    onClick={() => setOptimizationMode('power')}
+                  >
+                    Power optimization
+                  </button>
+                </div>
+
+                <div className="sheet-section-head">
+                  <span className="panel-label">Parameters</span>
+                  <span className="sheet-step">Step 2</span>
+                </div>
+                <label className="input-block">
+                  <span>{inputLabel}</span>
+                  <div className="input-row">
+                    <input
+                      type="text"
+                      value={optimizationValue}
+                      onChange={(event) => setOptimizationValue(event.target.value)}
+                      placeholder={inputPlaceholder}
+                    />
+                    <span className="input-unit">{inputUnit}</span>
+                  </div>
+                </label>
+
+                <div className="sheet-section-head">
+                  <span className="panel-label">Area selection</span>
+                  <span className="sheet-step">
+                    {hasBoundingBox ? 'Ready' : 'Step 3'}
+                  </span>
+                </div>
+                <div className="selection-summary">
+                  <strong>{boundingBoxSummary}</strong>
+                  <p className="selection-hint">
+                    Search to move the map, then draw or edit the polygon for the
+                    final optimization area.
+                  </p>
+                </div>
+
+                <div className="action-stack">
+                  <button
+                    type="button"
+                    className={
+                      boundingBoxSelectionActive
+                        ? 'sidebar-action active'
+                        : 'sidebar-action'
+                    }
+                    onClick={() =>
+                      setBoundingBoxSelectionActive((current) => !current)
+                    }
+                  >
+                    {boundingBoxSelectionActive
+                      ? 'Cancel polygon'
+                      : hasBoundingBox
+                        ? 'Redraw polygon'
+                        : 'Draw polygon'}
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-action"
+                    disabled={!hasBoundingBox}
+                    onClick={() => {
+                      if (!hasBoundingBox) {
+                        return
+                      }
+
+                      startTransition(() => {
+                        setBoundingBoxSelectionActive(false)
+                        setEditSelectionRequest({
+                          id: Date.now(),
+                        })
+                      })
+                    }}
+                  >
+                    Edit selection
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-action sidebar-action-danger"
+                    disabled={!hasBoundingBox}
+                    onClick={() => {
+                      startTransition(() => {
+                        setBoundingBoxSelectionActive(false)
+                        setBoundingBox(null)
+                      })
+                    }}
+                  >
+                    Delete selection
+                  </button>
+                  <button
+                    type="button"
+                    className="sidebar-submit"
+                    disabled={!canSubmitOptimization}
+                    onClick={() => {
+                      void submitOptimizationRequest()
+                    }}
+                  >
+                    {optimizationSubmitting
+                      ? 'Submitting...'
+                      : 'Submit optimization request'}
+                  </button>
+                </div>
+
+                <p className="optimization-status">{optimizationStatusMessage}</p>
               </div>
             </div>
           ) : null}
@@ -587,7 +565,7 @@ function App() {
                 <button
                   type="button"
                   className="overlay-close-button"
-                  onClick={closeOptimizationResults}
+                  onClick={resetOptimizationWorkflow}
                   aria-label="Close optimization results"
                 >
                   ×
@@ -596,7 +574,11 @@ function App() {
               <div className="sidebar-results overlay-results-grid">
                 <div className="result-row">
                   <span>Mode</span>
-                  <strong>{optimizationResult.mode === 'cash' ? 'Budget target' : 'Power target'}</strong>
+                  <strong>
+                    {optimizationResult.mode === 'cash'
+                      ? 'Budget target'
+                      : 'Power target'}
+                  </strong>
                 </div>
                 <div className="result-row">
                   <span>Sampled points</span>
@@ -615,42 +597,88 @@ function App() {
                 {optimizationResult.total_expected_power_kwh !== undefined ? (
                   <div className="result-row">
                     <span>Expected output</span>
-                    <strong>{Math.round(optimizationResult.total_expected_power_kwh).toLocaleString()} kWh</strong>
+                    <strong>
+                      {Math.round(
+                        optimizationResult.total_expected_power_kwh,
+                      ).toLocaleString()}{' '}
+                      kWh
+                    </strong>
                   </div>
                 ) : null}
                 {optimizationResult.total_raw_power_kwh !== undefined ? (
                   <div className="result-row">
                     <span>Raw output</span>
-                    <strong>{Math.round(optimizationResult.total_raw_power_kwh).toLocaleString()} kWh</strong>
+                    <strong>
+                      {Math.round(
+                        optimizationResult.total_raw_power_kwh,
+                      ).toLocaleString()}{' '}
+                      kWh
+                    </strong>
                   </div>
                 ) : null}
                 {optimizationResult.total_cost_usd !== undefined ? (
                   <div className="result-row">
                     <span>Total cost</span>
-                    <strong>{Math.round(optimizationResult.total_cost_usd).toLocaleString()} USD</strong>
+                    <strong>
+                      {Math.round(
+                        optimizationResult.total_cost_usd,
+                      ).toLocaleString()}{' '}
+                      USD
+                    </strong>
                   </div>
                 ) : null}
                 {optimizationResult.total_power_kwh !== undefined ? (
                   <div className="result-row">
                     <span>Total output</span>
-                    <strong>{Math.round(optimizationResult.total_power_kwh).toLocaleString()} kWh</strong>
+                    <strong>
+                      {Math.round(
+                        optimizationResult.total_power_kwh,
+                      ).toLocaleString()}{' '}
+                      kWh
+                    </strong>
                   </div>
                 ) : null}
                 {optimizationResult.total_actual_cost_usd !== undefined ? (
                   <div className="result-row">
                     <span>Actual cost</span>
-                    <strong>{Math.round(optimizationResult.total_actual_cost_usd).toLocaleString()} USD</strong>
+                    <strong>
+                      {Math.round(
+                        optimizationResult.total_actual_cost_usd,
+                      ).toLocaleString()}{' '}
+                      USD
+                    </strong>
                   </div>
                 ) : null}
                 {optimizationResult.total_effective_cost_usd !== undefined ? (
                   <div className="result-row">
                     <span>Effective cost</span>
-                    <strong>{Math.round(optimizationResult.total_effective_cost_usd).toLocaleString()} USD</strong>
+                    <strong>
+                      {Math.round(
+                        optimizationResult.total_effective_cost_usd,
+                      ).toLocaleString()}{' '}
+                      USD
+                    </strong>
                   </div>
                 ) : null}
               </div>
             </div>
           ) : null}
+
+          <div className="map-bottom-right">
+            {!optimizationResult ? (
+              <button
+                type="button"
+                className="optimization-fab"
+                onClick={() => setOptimizationPanelOpen(true)}
+              >
+                Optimization request
+              </button>
+            ) : null}
+
+            {optimizationStatusMessage && !optimizationResult ? (
+              <p className="map-status-pill">{optimizationStatusMessage}</p>
+            ) : null}
+          </div>
         </div>
       </section>
     </main>
