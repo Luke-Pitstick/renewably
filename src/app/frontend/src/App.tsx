@@ -721,8 +721,7 @@ function App() {
                 <div className="selection-summary">
                   <strong>{boundingBoxSummary}</strong>
                   <p className="selection-hint">
-                    Search to move the map, then draw or edit the polygon for the
-                    final optimization area.
+                    Draw or edit a polygon on the map for the optimization area.
                   </p>
                 </div>
 
@@ -786,11 +785,13 @@ function App() {
                   >
                     {optimizationSubmitting
                       ? 'Submitting...'
-                      : 'Submit Optimization Request'}
+                      : 'Submit request'}
                   </button>
                 </div>
 
-                <p className="optimization-status">{optimizationStatusMessage}</p>
+                {optimizationStatusMessage ? (
+                  <p className="optimization-status">{optimizationStatusMessage}</p>
+                ) : null}
               </div>
             </div>
           ) : null}
