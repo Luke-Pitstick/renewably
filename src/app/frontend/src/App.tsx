@@ -1,4 +1,4 @@
-import { startTransition, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useState } from 'react'
 import './App.css'
 import { ArcGISMap } from './ArcGISMap'
 
@@ -18,6 +18,10 @@ type SelectionPolygon = {
 type LocationSearchRequest = {
   id: number
   query: string
+}
+
+type LocationSuggestion = {
+  text: string
 }
 
 type EditSelectionRequest = {
@@ -60,10 +64,14 @@ type OptimizationResponse = {
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ??
   'http://127.0.0.1:8000'
+const LOCATION_SUGGEST_URL =
+  'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest'
 
 function App() {
+  const [topographyVisible, setTopographyVisible] = useState(true)
   const [solarVisible, setSolarVisible] = useState(false)
   const [windVisible, setWindVisible] = useState(true)
+  const [windParticlesVisible, setWindParticlesVisible] = useState(true)
   const [solarFarmsVisible, setSolarFarmsVisible] = useState(false)
   const [windFarmsVisible, setWindFarmsVisible] = useState(false)
   const [powerLinesVisible, setPowerLinesVisible] = useState(false)
@@ -80,6 +88,11 @@ function App() {
   const [locationQuery, setLocationQuery] = useState('')
   const [locationSearchRequest, setLocationSearchRequest] =
     useState<LocationSearchRequest | null>(null)
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([])
+  const [locationSuggestionsOpen, setLocationSuggestionsOpen] = useState(false)
+  const [locationSuggestionsLoading, setLocationSuggestionsLoading] = useState(false)
+  const [activeLocationSuggestionIndex, setActiveLocationSuggestionIndex] =
+    useState(-1)
   const [editSelectionRequest, setEditSelectionRequest] =
     useState<EditSelectionRequest | null>(null)
   const [optimizationSubmitting, setOptimizationSubmitting] = useState(false)
@@ -90,6 +103,7 @@ function App() {
     useState<OptimizationFocusRequest | null>(null)
 
   const activeLayerCount =
+    Number(topographyVisible) +
     Number(solarVisible) +
     Number(windVisible) +
     Number(solarFarmsVisible) +
@@ -101,6 +115,8 @@ function App() {
   const inputPlaceholder =
     optimizationMode === 'cash' ? 'Enter max budget' : 'Enter required power'
   const inputUnit = optimizationMode === 'cash' ? 'USD' : 'kWh'
+  const deferredLocationQuery = useDeferredValue(locationQuery)
+  const trimmedDeferredLocationQuery = deferredLocationQuery.trim()
   const boundingBoxSummary = boundingBox
     ? 'Polygon selected on map'
     : 'No area selected'
@@ -112,11 +128,75 @@ function App() {
     optimizationTargetValue > 0 &&
     !optimizationSubmitting
 
-  const submitLocationSearch = () => {
-    const query = locationQuery.trim()
+  useEffect(() => {
+    if (trimmedDeferredLocationQuery.length < 2) {
+      setLocationSuggestions([])
+      setLocationSuggestionsLoading(false)
+      setActiveLocationSuggestionIndex(-1)
+      return
+    }
+
+    const controller = new AbortController()
+    setLocationSuggestionsLoading(true)
+
+    fetch(
+      `${LOCATION_SUGGEST_URL}?f=json&text=${encodeURIComponent(trimmedDeferredLocationQuery)}&maxSuggestions=6`,
+      { signal: controller.signal },
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error('Suggestion request failed')
+        }
+
+        return (await response.json()) as {
+          suggestions?: Array<{
+            text?: string
+          }>
+        }
+      })
+      .then((payload) => {
+        const nextSuggestions = (payload.suggestions ?? [])
+          .map((suggestion) => suggestion.text?.trim() ?? '')
+          .filter((text, index, all) => text.length > 0 && all.indexOf(text) === index)
+          .map((text) => ({ text }))
+
+        setLocationSuggestions(nextSuggestions)
+        setActiveLocationSuggestionIndex((current) =>
+          nextSuggestions.length === 0
+            ? -1
+            : current >= 0
+              ? Math.min(current, nextSuggestions.length - 1)
+              : -1,
+        )
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+
+        setLocationSuggestions([])
+        setActiveLocationSuggestionIndex(-1)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLocationSuggestionsLoading(false)
+        }
+      })
+
+    return () => {
+      controller.abort()
+    }
+  }, [trimmedDeferredLocationQuery])
+
+  const submitLocationSearch = (queryOverride?: string) => {
+    const query = (queryOverride ?? locationQuery).trim()
     if (!query) {
       return
     }
+
+    setLocationSuggestions([])
+    setLocationSuggestionsOpen(false)
+    setActiveLocationSuggestionIndex(-1)
 
     startTransition(() => {
       setLocationSearchRequest({
@@ -124,6 +204,11 @@ function App() {
         query,
       })
     })
+  }
+
+  const selectLocationSuggestion = (suggestion: LocationSuggestion) => {
+    setLocationQuery(suggestion.text)
+    submitLocationSearch(suggestion.text)
   }
 
   const resetOptimizationWorkflow = () => {
@@ -144,7 +229,7 @@ function App() {
     }
 
     setOptimizationSubmitting(true)
-    setOptimizationStatusMessage('Submitting optimization request...')
+    setOptimizationStatusMessage('Submitting Optimization Request...')
 
     try {
       const response = await fetch(`${API_BASE_URL}/optimize`, {
@@ -162,7 +247,7 @@ function App() {
 
       if (!response.ok) {
         const errorBody = await response.json().catch(() => null)
-        throw new Error(errorBody?.detail ?? 'Optimization request failed')
+        throw new Error(errorBody?.detail ?? 'Optimization Request Failed')
       }
 
       const result = (await response.json()) as OptimizationResponse
@@ -179,7 +264,7 @@ function App() {
       )
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : 'Optimization request failed'
+        error instanceof Error ? error.message : 'Optimization Request Failed'
       setOptimizationStatusMessage(message)
     } finally {
       setOptimizationSubmitting(false)
@@ -191,13 +276,11 @@ function App() {
       <section className="map-stage">
         <div className="map-frame">
           <div className="map-top-left">
-            <div className="brand-banner">
-              <div className="brand-mark" aria-hidden="true">
-                R
-              </div>
-              <div className="brand-copy">
-                <p className="eyebrow">Renewably Atlas</p>
-                <h1>Grid intelligence studio</h1>
+            <div className="map-top-left-header">
+              <div className="brand-banner">
+                <div className="brand-copy">
+                  <h1>Renewable Optimization Studio</h1>
+                </div>
               </div>
             </div>
 
@@ -205,21 +288,129 @@ function App() {
               className="map-search"
               onSubmit={(event) => {
                 event.preventDefault()
+                if (
+                  locationSuggestionsOpen &&
+                  activeLocationSuggestionIndex >= 0 &&
+                  activeLocationSuggestionIndex < locationSuggestions.length
+                ) {
+                  selectLocationSuggestion(
+                    locationSuggestions[activeLocationSuggestionIndex],
+                  )
+                  return
+                }
+
                 submitLocationSearch()
               }}
             >
-              <label className="map-search-field">
-                <span className="map-search-icon" aria-hidden="true">
-                  ⌕
-                </span>
-                <input
-                  type="text"
-                  value={locationQuery}
-                  onChange={(event) => setLocationQuery(event.target.value)}
-                  placeholder="Search city, state, or address"
-                  aria-label="Search city, state, or address"
-                />
-              </label>
+              <div className="map-search-input-group">
+                <label className="map-search-field">
+                  <span className="map-search-icon" aria-hidden="true">
+                    ⌕
+                  </span>
+                  <input
+                    type="text"
+                    value={locationQuery}
+                    onChange={(event) => {
+                      setLocationQuery(event.target.value)
+                      setLocationSuggestionsOpen(true)
+                      setActiveLocationSuggestionIndex(-1)
+                    }}
+                    onFocus={() => {
+                      if (trimmedDeferredLocationQuery.length >= 2) {
+                        setLocationSuggestionsOpen(true)
+                      }
+                    }}
+                    onBlur={() => {
+                      setLocationSuggestionsOpen(false)
+                      setActiveLocationSuggestionIndex(-1)
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        !locationSuggestionsOpen ||
+                        locationSuggestions.length === 0
+                      ) {
+                        if (event.key === 'Escape') {
+                          setLocationSuggestionsOpen(false)
+                        }
+
+                        return
+                      }
+
+                      if (event.key === 'ArrowDown') {
+                        event.preventDefault()
+                        setActiveLocationSuggestionIndex((current) =>
+                          current >= locationSuggestions.length - 1 ? 0 : current + 1,
+                        )
+                        return
+                      }
+
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault()
+                        setActiveLocationSuggestionIndex((current) =>
+                          current <= 0 ? locationSuggestions.length - 1 : current - 1,
+                        )
+                        return
+                      }
+
+                      if (event.key === 'Escape') {
+                        setLocationSuggestionsOpen(false)
+                        setActiveLocationSuggestionIndex(-1)
+                      }
+                    }}
+                    placeholder="Search city, state, or address"
+                    aria-label="Search city, state, or address"
+                    aria-autocomplete="list"
+                    aria-expanded={locationSuggestionsOpen}
+                    aria-controls="map-search-suggestions"
+                    aria-activedescendant={
+                      activeLocationSuggestionIndex >= 0
+                        ? `map-search-suggestion-${activeLocationSuggestionIndex}`
+                        : undefined
+                    }
+                  />
+                </label>
+
+                {locationSuggestionsOpen && trimmedDeferredLocationQuery.length >= 2 ? (
+                  <div
+                    id="map-search-suggestions"
+                    className="map-search-suggestions"
+                    role="listbox"
+                    aria-label="Search suggestions"
+                  >
+                    {locationSuggestions.length > 0 ? (
+                      locationSuggestions.map((suggestion, index) => (
+                        <button
+                          key={`${suggestion.text}-${index}`}
+                          id={`map-search-suggestion-${index}`}
+                          type="button"
+                          role="option"
+                          className={
+                            index === activeLocationSuggestionIndex
+                              ? 'map-search-suggestion map-search-suggestion-active'
+                              : 'map-search-suggestion'
+                          }
+                          aria-selected={index === activeLocationSuggestionIndex}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                          }}
+                          onClick={() => {
+                            selectLocationSuggestion(suggestion)
+                          }}
+                        >
+                          <span className="map-search-suggestion-icon" aria-hidden="true">
+                            ↗
+                          </span>
+                          <span>{suggestion.text}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="map-search-empty" aria-live="polite">
+                        {locationSuggestionsLoading ? 'Searching places...' : 'No matches found.'}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>
               <button type="submit" className="map-search-button">
                 Search
               </button>
@@ -227,9 +418,10 @@ function App() {
           </div>
 
           <ArcGISMap
-            topographyVisible={false}
+            topographyVisible={topographyVisible}
             solarVisible={solarVisible}
             windVisible={windVisible}
+            windParticlesVisible={windParticlesVisible}
             solarFarmsVisible={solarFarmsVisible}
             windFarmsVisible={windFarmsVisible}
             powerLinesVisible={powerLinesVisible}
@@ -278,158 +470,195 @@ function App() {
                 ) : null}
               </div>
 
-              <button
-                type="button"
-                className="layer-menu-toggle"
-                onClick={() => setLayerMenuOpen((current) => !current)}
-                aria-expanded={layerMenuOpen}
-                aria-label="Toggle layer menu"
-              >
-                <span className="layer-menu-toggle-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" role="presentation">
-                    <path
-                      d="M12 3 4 7.4 12 11.8 20 7.4 12 3Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M4 11.1 12 15.5 20 11.1"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M4 14.9 12 19.3 20 14.9"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
-                <span className="layer-menu-toggle-count">{activeLayerCount}</span>
-              </button>
-            </div>
+              <div className="layer-dock-anchor">
+                <button
+                  type="button"
+                  className="layer-menu-toggle"
+                  onClick={() => setLayerMenuOpen((current) => !current)}
+                  aria-expanded={layerMenuOpen}
+                  aria-label="Toggle layer menu"
+                >
+                  <span className="layer-menu-toggle-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation">
+                      <path
+                        d="M12 3 4 7.4 12 11.8 20 7.4 12 3Z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M4 11.1 12 15.5 20 11.1"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M4 14.9 12 19.3 20 14.9"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className="layer-menu-toggle-count">{activeLayerCount}</span>
+                </button>
 
-            {layerMenuOpen ? (
-              <div className="map-overlay layer-dock">
-                <div className="legend-header">
-                  <div>
-                    <p className="panel-label">Map layers</p>
-                    <span className="legend-unit">{activeLayerCount} active</span>
+                {layerMenuOpen ? (
+                  <div className="map-overlay layer-dock">
+                    <div className="legend-header">
+                      <div>
+                        <p className="panel-label">Map layers</p>
+                        <span className="legend-unit">{activeLayerCount} active</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="overlay-close-button"
+                        onClick={() => setLayerMenuOpen(false)}
+                        aria-label="Close layer menu"
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="floating-layer-list">
+                      <label className="floating-layer-card">
+                        <div className="floating-layer-copy">
+                          <strong>Topography</strong>
+                          <p>Terrain hillshade for elevation context.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={topographyVisible}
+                          onChange={() => {
+                            startTransition(() => {
+                              setTopographyVisible((current) => !current)
+                            })
+                          }}
+                        />
+                      </label>
+
+                      <label className="floating-layer-card">
+                        <div className="floating-layer-copy">
+                          <strong>Solar irradiation</strong>
+                          <p>Estimated solar resource intensity.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={solarVisible}
+                          onChange={() => {
+                            startTransition(() => {
+                              setSolarVisible((current) => !current)
+                            })
+                          }}
+                        />
+                      </label>
+
+                      <div className="floating-layer-group">
+                        <label className="floating-layer-card">
+                          <div className="floating-layer-copy">
+                            <strong>Wind speed</strong>
+                            <p>Estimated wind resource intensity.</p>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={windVisible}
+                            onChange={() => {
+                              startTransition(() => {
+                                setWindVisible((current) => !current)
+                              })
+                            }}
+                          />
+                        </label>
+
+                        {windVisible ? (
+                          <label className="floating-layer-subcard">
+                            <div className="floating-layer-subcopy">
+                              <strong>Wind particles</strong>
+                              <p>Animated wind flow streaks.</p>
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={windParticlesVisible}
+                              onChange={() => {
+                                startTransition(() => {
+                                  setWindParticlesVisible((current) => !current)
+                                })
+                              }}
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+
+                      <label className="floating-layer-card">
+                        <div className="floating-layer-copy">
+                          <strong>Solar farm sites</strong>
+                          <p>Known solar farm locations.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={solarFarmsVisible}
+                          onChange={() => {
+                            startTransition(() => {
+                              setSolarFarmsVisible((current) => !current)
+                            })
+                          }}
+                        />
+                      </label>
+
+                      <label className="floating-layer-card">
+                        <div className="floating-layer-copy">
+                          <strong>Wind farm sites</strong>
+                          <p>Known wind farm locations.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={windFarmsVisible}
+                          onChange={() => {
+                            startTransition(() => {
+                              setWindFarmsVisible((current) => !current)
+                            })
+                          }}
+                        />
+                      </label>
+
+                      <label className="floating-layer-card">
+                        <div className="floating-layer-copy">
+                          <strong>Major power lines</strong>
+                          <p>Transmission line corridors.</p>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={powerLinesVisible}
+                          onChange={() => {
+                            startTransition(() => {
+                              setPowerLinesVisible((current) => !current)
+                            })
+                          }}
+                        />
+                      </label>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    className="overlay-close-button"
-                    onClick={() => setLayerMenuOpen(false)}
-                    aria-label="Close layer menu"
-                  >
-                    ×
-                  </button>
-                </div>
-
-                <div className="floating-layer-list">
-                  <label className="floating-layer-card">
-                    <div className="floating-layer-copy">
-                      <strong>Solar irradiation</strong>
-                      <p>Estimated solar resource intensity.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={solarVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setSolarVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-
-                  <label className="floating-layer-card">
-                    <div className="floating-layer-copy">
-                      <strong>Wind speed</strong>
-                      <p>Estimated wind resource intensity.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={windVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setWindVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-
-                  <label className="floating-layer-card">
-                    <div className="floating-layer-copy">
-                      <strong>Solar farm sites</strong>
-                      <p>Known solar farm locations.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={solarFarmsVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setSolarFarmsVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-
-                  <label className="floating-layer-card">
-                    <div className="floating-layer-copy">
-                      <strong>Wind farm sites</strong>
-                      <p>Known wind farm locations.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={windFarmsVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setWindFarmsVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-
-                  <label className="floating-layer-card">
-                    <div className="floating-layer-copy">
-                      <strong>Major power lines</strong>
-                      <p>Transmission line corridors.</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={powerLinesVisible}
-                      onChange={() => {
-                        startTransition(() => {
-                          setPowerLinesVisible((current) => !current)
-                        })
-                      }}
-                    />
-                  </label>
-                </div>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
 
           {optimizationPanelOpen ? (
             <div className="map-overlay optimization-sheet">
               <div className="legend-header overlay-results-header">
                 <div>
-                  <p className="panel-label">Renewably workflow</p>
-                  <h2 className="sheet-title">Optimization request</h2>
+                  <h2 className="sheet-title">Optimization Request</h2>
                 </div>
                 <button
                   type="button"
                   className="overlay-close-button"
                   onClick={() => setOptimizationPanelOpen(false)}
-                  aria-label="Close optimization request"
+                  aria-label="Close optimization Request"
                 >
                   ×
                 </button>
@@ -556,7 +785,7 @@ function App() {
                   >
                     {optimizationSubmitting
                       ? 'Submitting...'
-                      : 'Submit optimization request'}
+                      : 'Submit Optimization Request'}
                   </button>
                 </div>
 
@@ -681,7 +910,7 @@ function App() {
                 className="optimization-fab"
                 onClick={() => setOptimizationPanelOpen(true)}
               >
-                Optimization request
+                Optimization Request
               </button>
             ) : null}
 

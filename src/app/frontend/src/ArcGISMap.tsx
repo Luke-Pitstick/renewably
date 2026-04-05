@@ -4,6 +4,7 @@ type ArcGISMapProps = {
   topographyVisible: boolean
   solarVisible: boolean
   windVisible: boolean
+  windParticlesVisible: boolean
   solarFarmsVisible: boolean
   windFarmsVisible: boolean
   powerLinesVisible: boolean
@@ -315,8 +316,8 @@ const PARTICLE_STYLE_PALETTE: ParticleStyle[] = Array.from(
     return {
       glowColor: `hsla(${hue.toFixed(0)}, 100%, 74%, ${glowAlpha.toFixed(2)})`,
       coreColor: `hsla(${(hue + 8).toFixed(0)}, 95%, 90%, ${coreAlpha.toFixed(2)})`,
-      glowWidth: 2.1 + intensity * 1.6,
-      coreWidth: 1.15 + intensity * 1.05,
+      glowWidth: 2.8 + intensity * 2.2,
+      coreWidth: 1.5 + intensity * 1.4,
     }
   },
 )
@@ -879,6 +880,19 @@ function shouldRebuildWindField(
   )
 }
 
+function windViewportCoverage(extent: NumericBbox, windGrid: ScalarGrid) {
+  const extentArea = Math.max(
+    1,
+    (extent.xmax - extent.xmin) * (extent.ymax - extent.ymin),
+  )
+
+  return clamp(
+    extentArea / ((windGrid.xmax - windGrid.xmin) * (windGrid.ymax - windGrid.ymin)),
+    0.02,
+    1,
+  )
+}
+
 function projectToScreen(
   view: ViewHandle,
   PointCtor: ArcGISPointCtor,
@@ -1162,6 +1176,7 @@ export const ArcGISMap = memo(function ArcGISMap({
   topographyVisible,
   solarVisible,
   windVisible,
+  windParticlesVisible,
   solarFarmsVisible,
   windFarmsVisible,
   powerLinesVisible,
@@ -1906,7 +1921,7 @@ export const ArcGISMap = memo(function ArcGISMap({
       return
     }
 
-    if (!windVisible || !view || !coreModules) {
+    if (!windVisible || !windParticlesVisible || !view || !coreModules) {
       clearCanvas(context, canvas)
       return
     }
@@ -1964,18 +1979,9 @@ export const ArcGISMap = memo(function ArcGISMap({
           extent: NumericBbox,
           recoveryMode: boolean,
         ) => {
-          const extentArea = Math.max(
-            1,
-            (extent.xmax - extent.xmin) * (extent.ymax - extent.ymin),
-          )
-          const coverage = clamp(
-            extentArea /
-              ((windGrid.xmax - windGrid.xmin) * (windGrid.ymax - windGrid.ymin)),
-            0.02,
-            1,
-          )
+          const coverage = windViewportCoverage(extent, windGrid)
           const targetCount = Math.round(
-            (recoveryMode ? 140 : 220) + coverage * (recoveryMode ? 120 : 220),
+            (recoveryMode ? 82 : 112) + coverage * (recoveryMode ? 156 : 220),
           )
 
           while (particles.length < targetCount) {
@@ -2011,14 +2017,14 @@ export const ArcGISMap = memo(function ArcGISMap({
           const hidden = document.visibilityState === 'hidden'
           const moving = interactionStateRef.current
 
-          if (hidden || moving) {
+          if (hidden) {
             if (!canvasWasCleared) {
               clearCanvas(context, canvas)
               canvasWasCleared = true
             }
 
             lastTime = timestamp
-            scheduleNextFrame(hidden ? 240 : 120)
+            scheduleNextFrame(240)
             return
           }
 
@@ -2036,7 +2042,8 @@ export const ArcGISMap = memo(function ArcGISMap({
           }
 
           const recoveryMode =
-            timestamp - lastMotionAtRef.current < WIND_RECOVERY_MS
+            moving || timestamp - lastMotionAtRef.current < WIND_RECOVERY_MS
+          const viewportCoverage = windViewportCoverage(visibleExtent, windGrid)
           const fieldCols = recoveryMode ? 36 : 48
           const fieldRows = recoveryMode ? 22 : 30
 
@@ -2066,15 +2073,21 @@ export const ArcGISMap = memo(function ArcGISMap({
           const width = canvas.clientWidth
           const height = canvas.clientHeight
           const deltaSeconds = Math.min((timestamp - lastTime) / 1000, 0.04)
-          const segmentCount = recoveryMode ? 2 : 4
+          const segmentCount =
+            viewportCoverage < 0.1 ? 3 : recoveryMode ? 3 : 4
+          const viewportSpeedFactor = 0.42 + viewportCoverage * 0.5
           lastTime = timestamp
 
-          context.save()
-          context.setTransform(1, 0, 0, 1, 0, 0)
-          context.globalCompositeOperation = 'destination-in'
-          context.fillStyle = 'rgba(255, 255, 255, 0.94)'
-          context.fillRect(0, 0, canvas.width, canvas.height)
-          context.restore()
+          if (moving) {
+            clearCanvas(context, canvas)
+          } else {
+            context.save()
+            context.setTransform(1, 0, 0, 1, 0, 0)
+            context.globalCompositeOperation = 'destination-in'
+            context.fillStyle = 'rgba(255, 255, 255, 0.92)'
+            context.fillRect(0, 0, canvas.width, canvas.height)
+            context.restore()
+          }
 
           context.lineCap = 'round'
           context.lineJoin = 'round'
@@ -2114,7 +2127,8 @@ export const ArcGISMap = memo(function ArcGISMap({
             const emphasizedIntensity = emphasizeWindIntensity(vector.intensity)
             const segmentStep =
               deltaSeconds *
-              (0.1 + emphasizedIntensity * 0.24) *
+              (0.1 + emphasizedIntensity * 0.18) *
+              viewportSpeedFactor *
               particle.speedFactor
 
             for (let stepIndex = 0; stepIndex < segmentCount; stepIndex += 1) {
@@ -2231,7 +2245,7 @@ export const ArcGISMap = memo(function ArcGISMap({
       window.clearTimeout(timeoutId)
       clearCanvas(context, canvas)
     }
-  }, [mapReadyToken, windVisible])
+  }, [mapReadyToken, windVisible, windParticlesVisible])
 
   return (
     <>
@@ -2239,7 +2253,7 @@ export const ArcGISMap = memo(function ArcGISMap({
       <canvas
         ref={windCanvasRef}
         className={
-          windVisible
+          windVisible && windParticlesVisible
             ? 'wind-overlay-canvas wind-overlay-canvas-active'
             : 'wind-overlay-canvas'
         }
