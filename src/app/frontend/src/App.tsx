@@ -21,6 +21,75 @@ type EditSelectionRequest = {
   id: number
 }
 
+type OptimizationFocusRequest = {
+  id: number
+  boundingBox: BoundingBox
+}
+
+type OptimizationPoint = {
+  lat: number
+  lon: number
+  device_type: 'solar' | 'wind'
+  solar_power_kwh: number
+  wind_power_kwh: number
+  solar_probability?: number
+  wind_probability?: number
+  expected_power_kwh?: number
+  selected_power_kwh?: number
+  device_cost_usd?: number
+  effective_cost_usd?: number
+}
+
+type OptimizationResponse = {
+  selected_count: number
+  mode: 'cash' | 'power'
+  sample_count: number
+  total_cost_usd?: number
+  total_actual_cost_usd?: number
+  total_expected_power_kwh?: number
+  total_power_kwh?: number
+  total_raw_power_kwh?: number
+  total_effective_cost_usd?: number
+  power_basis?: string
+  power_window_hours?: number
+  points?: OptimizationPoint[]
+  debug?: {
+    raw_predictions: {
+      solar: { min: number; max: number; mean: number }
+      wind: { min: number; max: number; mean: number }
+    }
+    converted_power_kwh: {
+      solar: { min: number; max: number; mean: number }
+      wind: { min: number; max: number; mean: number }
+    }
+    positive_counts: {
+      solar_predictions: number
+      wind_predictions: number
+      solar_power: number
+      wind_power: number
+      solar_expected_power: number
+      wind_expected_power: number
+    }
+    affordable_counts: {
+      solar: number | null
+      wind: number | null
+    }
+    score_comparison: {
+      solar_wins: number
+      wind_wins: number
+      ties: number
+      solar_score: { min: number; max: number; mean: number }
+      wind_score: { min: number; max: number; mean: number }
+      top_solar_scores: number[]
+      top_wind_scores: number[]
+    }
+  }
+}
+
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ??
+  'http://127.0.0.1:8000'
+
 function App() {
   const [solarVisible, setSolarVisible] = useState(false)
   const [windVisible, setWindVisible] = useState(true)
@@ -44,6 +113,12 @@ function App() {
     useState<LocationSearchRequest | null>(null)
   const [editSelectionRequest, setEditSelectionRequest] =
     useState<EditSelectionRequest | null>(null)
+  const [optimizationSubmitting, setOptimizationSubmitting] = useState(false)
+  const [optimizationStatusMessage, setOptimizationStatusMessage] = useState('')
+  const [optimizationResult, setOptimizationResult] =
+    useState<OptimizationResponse | null>(null)
+  const [optimizationFocusRequest, setOptimizationFocusRequest] =
+    useState<OptimizationFocusRequest | null>(null)
   const activeLayerCount =
     Number(solarVisible) +
     Number(windVisible) +
@@ -59,6 +134,12 @@ function App() {
     ? 'Area selected on map'
     : 'No area selected'
   const hasBoundingBox = boundingBox !== null
+  const optimizationTargetValue = Number(optimizationValue)
+  const canSubmitOptimization =
+    hasBoundingBox &&
+    Number.isFinite(optimizationTargetValue) &&
+    optimizationTargetValue > 0 &&
+    !optimizationSubmitting
   const toggleSection = (section: SidebarSectionKey) => {
     setOpenSections((current) => ({
       ...current,
@@ -78,6 +159,63 @@ function App() {
         query,
       })
     })
+  }
+
+  const closeOptimizationResults = () => {
+    setOptimizationResult(null)
+    setOptimizationFocusRequest(null)
+    setOptimizationStatusMessage('')
+    setOptimizationMode('cash')
+    setOptimizationValue('')
+    setBoundingBoxSelectionActive(false)
+    setBoundingBox(null)
+  }
+
+  const submitOptimizationRequest = async () => {
+    if (!boundingBox || !canSubmitOptimization) {
+      return
+    }
+
+    setOptimizationSubmitting(true)
+    setOptimizationStatusMessage('Submitting optimization request...')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/optimize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: optimizationMode,
+          target_value: optimizationTargetValue,
+          bounding_box: boundingBox,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null)
+        throw new Error(errorBody?.detail ?? 'Optimization request failed')
+      }
+
+      const result = (await response.json()) as OptimizationResponse
+      setOptimizationResult(result)
+      setOptimizationFocusRequest({
+        id: Date.now(),
+        boundingBox,
+      })
+      const summary =
+        optimizationMode === 'cash'
+          ? `${result.selected_count} sites selected · expected output ${Math.round(result.total_expected_power_kwh ?? 0).toLocaleString()} kWh`
+          : `${result.selected_count} sites selected · actual cost ${Math.round(result.total_actual_cost_usd ?? 0).toLocaleString()} USD`
+
+      setOptimizationStatusMessage(summary)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Optimization request failed'
+      setOptimizationStatusMessage(message)
+    } finally {
+      setOptimizationSubmitting(false)
+    }
   }
 
   return (
@@ -230,10 +368,20 @@ function App() {
                 >
                   Delete Selection
                 </button>
-                <button type="button" className="sidebar-submit">
-                  Submit Optimization Request
+                <button
+                  type="button"
+                  className="sidebar-submit"
+                  disabled={!canSubmitOptimization}
+                  onClick={() => {
+                    void submitOptimizationRequest()
+                  }}
+                >
+                  {optimizationSubmitting
+                    ? 'Submitting...'
+                    : 'Submit Optimization Request'}
                 </button>
                 </div>
+                <p className="optimization-status">{optimizationStatusMessage}</p>
               </div>
             ) : null}
           </section>
@@ -383,6 +531,8 @@ function App() {
             solarFarmsVisible={solarFarmsVisible}
             windFarmsVisible={windFarmsVisible}
             powerLinesVisible={powerLinesVisible}
+            optimizationSites={optimizationResult?.points ?? []}
+            optimizationFocusRequest={optimizationFocusRequest}
             boundingBox={boundingBox}
             boundingBoxSelectionActive={boundingBoxSelectionActive}
             editSelectionRequest={editSelectionRequest}
@@ -423,6 +573,81 @@ function App() {
                 <span>Lower wind</span>
                 <span>Strong wind</span>
                 <span>Peak wind</span>
+              </div>
+            </div>
+          ) : null}
+
+          {optimizationResult ? (
+            <div className="map-overlay overlay-optimization-results">
+              <div className="legend-header overlay-results-header">
+                <div>
+                  <p className="panel-label">Optimization results</p>
+                  <span className="legend-unit">Live</span>
+                </div>
+                <button
+                  type="button"
+                  className="overlay-close-button"
+                  onClick={closeOptimizationResults}
+                  aria-label="Close optimization results"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="sidebar-results overlay-results-grid">
+                <div className="result-row">
+                  <span>Mode</span>
+                  <strong>{optimizationResult.mode === 'cash' ? 'Budget target' : 'Power target'}</strong>
+                </div>
+                <div className="result-row">
+                  <span>Sampled points</span>
+                  <strong>{optimizationResult.sample_count.toLocaleString()}</strong>
+                </div>
+                <div className="result-row">
+                  <span>Selected sites</span>
+                  <strong>{optimizationResult.selected_count.toLocaleString()}</strong>
+                </div>
+                {optimizationResult.power_basis === 'average_hourly_kwh' ? (
+                  <div className="result-row">
+                    <span>Output basis</span>
+                    <strong>Average hourly kWh</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_expected_power_kwh !== undefined ? (
+                  <div className="result-row">
+                    <span>Expected output</span>
+                    <strong>{Math.round(optimizationResult.total_expected_power_kwh).toLocaleString()} kWh</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_raw_power_kwh !== undefined ? (
+                  <div className="result-row">
+                    <span>Raw output</span>
+                    <strong>{Math.round(optimizationResult.total_raw_power_kwh).toLocaleString()} kWh</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_cost_usd !== undefined ? (
+                  <div className="result-row">
+                    <span>Total cost</span>
+                    <strong>{Math.round(optimizationResult.total_cost_usd).toLocaleString()} USD</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_power_kwh !== undefined ? (
+                  <div className="result-row">
+                    <span>Total output</span>
+                    <strong>{Math.round(optimizationResult.total_power_kwh).toLocaleString()} kWh</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_actual_cost_usd !== undefined ? (
+                  <div className="result-row">
+                    <span>Actual cost</span>
+                    <strong>{Math.round(optimizationResult.total_actual_cost_usd).toLocaleString()} USD</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_effective_cost_usd !== undefined ? (
+                  <div className="result-row">
+                    <span>Effective cost</span>
+                    <strong>{Math.round(optimizationResult.total_effective_cost_usd).toLocaleString()} USD</strong>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
