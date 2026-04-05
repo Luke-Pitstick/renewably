@@ -279,7 +279,8 @@ function App() {
             <div className="map-top-left-header">
               <div className="brand-banner">
                 <div className="brand-copy">
-                  <h1>Renewable Optimization Studio</h1>
+                  <h1>Renewably</h1>
+                  <p>Renewable Optimization Studio</p>
                 </div>
               </div>
             </div>

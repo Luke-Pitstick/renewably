@@ -66,9 +66,22 @@ image = image.add_local_dir(
 volume = modal.Volume.from_name("energy-models", create_if_missing=True)
 
 web_app = FastAPI()
+allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://renewably-1.onrender.com",
+]
+extra_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+if extra_cors_origins:
+    allowed_origins.extend(
+        origin.strip()
+        for origin in extra_cors_origins.split(",")
+        if origin.strip()
+    )
+
 web_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=sorted(set(allowed_origins)),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

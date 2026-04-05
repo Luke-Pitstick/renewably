@@ -1653,6 +1653,15 @@
   text-shadow: 0 0 16px rgba(122, 214, 151, 0.1);
 }
 
+.brand-copy p {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(233, 242, 231, 0.72);
+}
+
 .map-home-button {
   min-height: 2.15rem;
   padding: 0.58rem 0.88rem;
