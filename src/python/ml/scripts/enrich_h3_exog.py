@@ -40,11 +40,12 @@ CHECKPOINT_DIR = os.path.join(DATA_DIR, "enrich_checkpoints")
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 GEE_DRIVE_FOLDER = os.getenv("GEE_DRIVE_FOLDER", "renewably_exports")
 GEE_DRIVE_MOUNT_ROOT = os.getenv("GEE_DRIVE_MOUNT_ROOT", "/content/drive/MyDrive")
+LOCAL_GEE_EXPORT_DIR = os.path.join(DATA_DIR, GEE_DRIVE_FOLDER)
 GEE_EXPORT_POLL_SECONDS = int(os.getenv("GEE_EXPORT_POLL_SECONDS", "15"))
 GEE_EXPORT_TIMEOUT_SECONDS = int(os.getenv("GEE_EXPORT_TIMEOUT_SECONDS", "7200"))
 GEE_DIRECT_SAMPLE_MAX_ROWS = int(os.getenv("GEE_DIRECT_SAMPLE_MAX_ROWS", "2000"))
 GEE_EXPORT_BATCH_SIZE = int(os.getenv("GEE_EXPORT_BATCH_SIZE", "2000"))
-GEE_RESUME_FROM_BATCH = int(os.getenv("GEE_RESUME_FROM_BATCH", "11"))
+GEE_RESUME_FROM_BATCH = int(os.getenv("GEE_RESUME_FROM_BATCH", "1"))
 GEE_STOP_AFTER_BATCH = int(os.getenv("GEE_STOP_AFTER_BATCH", "0"))
 FOREST_CODES = {41, 42, 43}
 CROP_CODES = {81, 82}
@@ -231,9 +232,29 @@ def export_batch_csv_glob(df: pl.DataFrame, batch_num: int) -> str:
     )
 
 
+def local_export_batch_csv_glob(df: pl.DataFrame, batch_num: int) -> str:
+    return os.path.join(
+        LOCAL_GEE_EXPORT_DIR,
+        f"{export_batch_prefix(df, batch_num)}*.csv",
+    )
+
+
 def find_exported_batch_csv(df: pl.DataFrame, batch_num: int) -> str | None:
-    matches = sorted(glob.glob(export_batch_csv_glob(df, batch_num)))
+    matches = sorted(
+        set(
+            glob.glob(local_export_batch_csv_glob(df, batch_num))
+            + glob.glob(export_batch_csv_glob(df, batch_num))
+        )
+    )
     return matches[0] if matches else None
+
+
+def list_all_export_batch_csvs() -> list[str]:
+    local_matches = glob.glob(os.path.join(LOCAL_GEE_EXPORT_DIR, "gee_features_*_batch_*.csv"))
+    drive_matches = glob.glob(
+        os.path.join(GEE_DRIVE_MOUNT_ROOT, GEE_DRIVE_FOLDER, "gee_features_*_batch_*.csv")
+    )
+    return sorted(set(local_matches + drive_matches))
 
 
 def iter_df_batches(df: pl.DataFrame, batch_size: int):
@@ -308,6 +329,66 @@ def find_active_export_task(description: str) -> object | None:
     return None
 
 
+def load_matching_local_export_df(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Load any locally downloaded Earth Engine batch CSVs that contain the target H3 cells.
+    This is resilient to prefix changes across resumed export runs because matching is done
+    by h3_index rather than only by dataset signature.
+    """
+    csv_paths = list_all_export_batch_csvs()
+    if not csv_paths:
+        return pl.DataFrame()
+
+    target_indices = df["h3_index"].to_list()
+    target_set = set(target_indices)
+    frames = []
+    coverage_by_prefix = {}
+
+    for csv_path in csv_paths:
+        batch_df = normalize_gee_feature_df(pl.read_csv(csv_path))
+        if "h3_index" not in batch_df.columns:
+            continue
+
+        batch_df = batch_df.unique(subset=["h3_index"], keep="last")
+        matched_df = batch_df.filter(pl.col("h3_index").is_in(target_indices))
+        if matched_df.is_empty():
+            continue
+
+        prefix = os.path.basename(csv_path).split("_batch_")[0]
+        coverage_by_prefix[prefix] = coverage_by_prefix.get(prefix, 0) + len(matched_df)
+        frames.append(matched_df)
+
+    if not frames:
+        return pl.DataFrame()
+
+    pooled_df = pl.concat(frames, how="vertical").unique(subset=["h3_index"], keep="last")
+    matched_count = len(pooled_df)
+    top_prefixes = sorted(coverage_by_prefix.items(), key=lambda item: item[1], reverse=True)[:3]
+    prefix_summary = ", ".join(f"{prefix} ({count})" for prefix, count in top_prefixes)
+    print(
+        f"Loaded {matched_count}/{len(target_set)} H3 rows from downloaded GEE batch CSVs"
+        + (f" using {prefix_summary}" if prefix_summary else "")
+    )
+    return pooled_df
+
+
+def load_gee_direct_batch_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFrame:
+    """Directly sample GEE in smaller batches when exports are incomplete or unavailable."""
+    batch_frames = []
+    for batch_num, total_batches, batch_df in iter_df_batches(df, GEE_DIRECT_SAMPLE_MAX_ROWS):
+        print(
+            f"[GEE direct {batch_num}/{total_batches}] Sampling {len(batch_df)} H3 cells directly"
+        )
+        fc = centroids_to_ee_fc(batch_df)
+        batch_result = normalize_gee_feature_df(
+            gee_feature_dict_to_df(sample_gee_features(fc, feature_image))
+        )
+        batch_result = batch_result.unique(subset=["h3_index"], keep="last")
+        batch_frames.append(batch_result)
+
+    return pl.concat(batch_frames, how="vertical") if batch_frames else pl.DataFrame()
+
+
 def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFrame:
     if len(df) <= GEE_DIRECT_SAMPLE_MAX_ROWS:
         fc = centroids_to_ee_fc(df)
@@ -316,27 +397,43 @@ def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFram
             gee_feature_dict_to_df(sample_gee_features(fc, feature_image))
         )
 
-    if not os.path.exists(GEE_DRIVE_MOUNT_ROOT):
-        raise FileNotFoundError(
-            f"Drive mount root {GEE_DRIVE_MOUNT_ROOT} not found. "
-            "Mount Google Drive in Colab before running the export workflow."
+    pooled_local_df = load_matching_local_export_df(df)
+    if not pooled_local_df.is_empty():
+        matched_indices = set(pooled_local_df["h3_index"].to_list())
+        target_indices = set(df["h3_index"].to_list())
+        if matched_indices >= target_indices:
+            print("Using downloaded GEE batch CSVs matched by h3_index.")
+            return pooled_local_df
+        missing_indices = [h3_index for h3_index in df["h3_index"].to_list() if h3_index not in matched_indices]
+        print(
+            f"Downloaded GEE batch CSVs cover {len(matched_indices)}/{len(target_indices)} "
+            "target H3 cells."
         )
+        if not os.path.exists(GEE_DRIVE_MOUNT_ROOT):
+            print(
+                f"Drive mount {GEE_DRIVE_MOUNT_ROOT} not found. Sampling the remaining "
+                f"{len(missing_indices)} H3 cells directly from Earth Engine."
+            )
+            missing_df = df.filter(pl.col("h3_index").is_in(missing_indices))
+            missing_gee_df = load_gee_direct_batch_df(missing_df, feature_image)
+            return pl.concat([pooled_local_df, missing_gee_df], how="vertical").unique(
+                subset=["h3_index"], keep="last"
+            )
+        print(
+            "Falling back to exact batch matching/export for the remaining H3 cells."
+        )
+
+    elif not os.path.exists(GEE_DRIVE_MOUNT_ROOT):
+        print(
+            f"No downloaded GEE batch CSVs matched and Drive mount {GEE_DRIVE_MOUNT_ROOT} "
+            "is unavailable. Sampling all H3 cells directly from Earth Engine."
+        )
+        return load_gee_direct_batch_df(df, feature_image)
 
     batch_frames = []
     for batch_num, total_batches, batch_df in iter_df_batches(
         df, GEE_EXPORT_BATCH_SIZE
     ):
-        if batch_num < GEE_RESUME_FROM_BATCH:
-            print(
-                f"[GEE {batch_num}/{total_batches}] Skipping batch before GEE_RESUME_FROM_BATCH={GEE_RESUME_FROM_BATCH}"
-            )
-            continue
-        if GEE_STOP_AFTER_BATCH and batch_num > GEE_STOP_AFTER_BATCH:
-            print(
-                f"[GEE] Stopping before batch {batch_num} due to GEE_STOP_AFTER_BATCH={GEE_STOP_AFTER_BATCH}"
-            )
-            break
-
         checkpoint_df = load_batch_checkpoint(df, batch_num)
         if checkpoint_df is not None:
             print(
@@ -356,6 +453,25 @@ def load_gee_export_df(df: pl.DataFrame, feature_image: ee.Image) -> pl.DataFram
             save_batch_checkpoint(df, batch_num, batch_result)
             batch_frames.append(batch_result)
             continue
+
+        if batch_num < GEE_RESUME_FROM_BATCH:
+            print(
+                f"[GEE {batch_num}/{total_batches}] Skipping missing batch before "
+                f"GEE_RESUME_FROM_BATCH={GEE_RESUME_FROM_BATCH}"
+            )
+            continue
+        if GEE_STOP_AFTER_BATCH and batch_num > GEE_STOP_AFTER_BATCH:
+            print(
+                f"[GEE] Stopping before batch {batch_num} due to GEE_STOP_AFTER_BATCH={GEE_STOP_AFTER_BATCH}"
+            )
+            break
+
+        if not os.path.exists(GEE_DRIVE_MOUNT_ROOT):
+            raise FileNotFoundError(
+                f"No local checkpoint or exported CSV found for batch {batch_num}. "
+                f"Expected a downloaded CSV in {LOCAL_GEE_EXPORT_DIR} or a Drive mount at "
+                f"{GEE_DRIVE_MOUNT_ROOT}."
+            )
 
         description = export_batch_prefix(df, batch_num)
         fc = centroids_to_ee_fc(batch_df)
@@ -491,6 +607,30 @@ def load_or_compute_checkpoint(
     return {h3_index: cached[h3_index] for h3_index in h3_indices if h3_index in cached}
 
 
+def fetch_json_with_retries(url: str, label: str) -> dict:
+    last_error = None
+    for attempt in range(4):
+        try:
+            resp = requests.get(url, timeout=120)
+            resp.raise_for_status()
+            try:
+                return resp.json()
+            except requests.exceptions.JSONDecodeError as exc:
+                snippet = resp.text[:200].strip().replace("\n", " ")
+                raise RuntimeError(
+                    f"{label} returned non-JSON response "
+                    f"(status {resp.status_code}): {snippet or '<empty response>'}"
+                ) from exc
+        except Exception as exc:
+            last_error = exc
+            if attempt == 3:
+                raise
+            sleep_s = 2**attempt
+            print(f"{label} request failed on attempt {attempt + 1}/4; retrying in {sleep_s}s")
+            time.sleep(sleep_s)
+    raise last_error
+
+
 # %% Cell 7: Distance to transmission lines (HIFLD — local download + KDTree)
 def fetch_transmission_distances(df: pl.DataFrame) -> dict:
     """
@@ -510,8 +650,10 @@ def fetch_transmission_distances(df: pl.DataFrame) -> dict:
         all_features = []
         offset = 0
         while True:
-            resp = requests.get(url + f"&resultOffset={offset}", timeout=120)
-            data = resp.json()
+            data = fetch_json_with_retries(
+                url + f"&resultOffset={offset}",
+                "HIFLD transmission lines",
+            )
             feats = data.get("features", [])
             if not feats:
                 break
@@ -520,6 +662,12 @@ def fetch_transmission_distances(df: pl.DataFrame) -> dict:
             offset += len(feats)
             if len(feats) < 50000:
                 break
+
+        if not all_features:
+            raise RuntimeError(
+                "HIFLD transmission line download returned zero features. "
+                f"If you already downloaded the dataset manually, place it at {hifld_path} and rerun."
+            )
 
         geojson = {"type": "FeatureCollection", "features": all_features}
         with open(hifld_path, "w") as f:
@@ -540,6 +688,8 @@ def fetch_transmission_distances(df: pl.DataFrame) -> dict:
         elif geom.geom_type == "LineString":
             coords.extend(geom.coords)
     coords = np.array(coords)  # shape (N, 2) in (lng, lat)
+    if len(coords) == 0:
+        raise ValueError(f"No transmission line coordinates were found in {hifld_path}")
     print(f"  {len(coords)} transmission line vertices")
 
     # Build KDTree in radians for haversine-approximate distances
@@ -576,6 +726,7 @@ def fetch_road_distances(df: pl.DataFrame) -> dict:
         os.makedirs(roads_dir, exist_ok=True)
         url = "https://www2.census.gov/geo/tiger/TIGER2023/PRIMARYROADS/tl_2023_us_primaryroads.zip"
         resp = requests.get(url, timeout=120)
+        resp.raise_for_status()
         zip_path = os.path.join(roads_dir, "roads.zip")
         with open(zip_path, "wb") as f:
             f.write(resp.content)

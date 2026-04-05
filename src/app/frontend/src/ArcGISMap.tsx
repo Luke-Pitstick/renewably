@@ -1,6 +1,7 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 
 type ArcGISMapProps = {
+  topographyVisible: boolean
   solarVisible: boolean
   windVisible: boolean
   solarFarmsVisible: boolean
@@ -35,6 +36,7 @@ type ArcGISMapProps = {
 }
 
 type ThemeLayerKind =
+  | 'topography'
   | 'solar'
   | 'wind'
   | 'solarFarms'
@@ -116,6 +118,7 @@ type MapCtor = new (properties?: Record<string, unknown>) => MapHandle
 type MapViewCtor = new (properties?: Record<string, unknown>) => ViewHandle
 type GeoJSONLayerCtor = new (properties?: Record<string, unknown>) => LayerHandle
 type FeatureLayerCtor = new (properties?: Record<string, unknown>) => LayerHandle
+type TileLayerCtor = new (properties?: Record<string, unknown>) => LayerHandle
 type GraphicsLayerCtor = new (
   properties?: Record<string, unknown>,
 ) => GraphicsLayerHandle
@@ -132,6 +135,7 @@ type CoreModules = {
   MapViewCtor: MapViewCtor
   GeoJSONLayerCtor: GeoJSONLayerCtor
   FeatureLayerCtor: FeatureLayerCtor
+  TileLayerCtor: TileLayerCtor
   GraphicsLayerCtor: GraphicsLayerCtor
   SketchViewModelCtor: SketchViewModelCtor
   PointCtor: ArcGISPointCtor
@@ -226,6 +230,8 @@ const SOLAR_FARMS_DATA_URL = '/data/solar_farm_sites.geojson'
 const WIND_FARMS_DATA_URL = '/data/wind_farm_sites.geojson'
 const POWER_LINES_DATA_URL =
   'https://services1.arcgis.com/Hp6G80Pky0om7QvQ/arcgis/rest/services/Electric_Power_Transmission_Lines/FeatureServer/0'
+const HILLSHADE_DATA_URL =
+  'https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer'
 const LOCATOR_URL =
   'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer'
 const MAX_WIND_CANVAS_DPR = 1.25
@@ -403,6 +409,7 @@ function loadCoreArcGISModules() {
         MapViewCtor,
         GeoJSONLayerCtor,
         FeatureLayerCtor,
+        TileLayerCtor,
         GraphicsLayerCtor,
         SketchViewModelCtor,
         ArcGISPointCtor,
@@ -414,6 +421,7 @@ function loadCoreArcGISModules() {
       'esri/views/MapView',
       'esri/layers/GeoJSONLayer',
       'esri/layers/FeatureLayer',
+      'esri/layers/TileLayer',
       'esri/layers/GraphicsLayer',
       'esri/widgets/Sketch/SketchViewModel',
       'esri/geometry/Point',
@@ -425,6 +433,7 @@ function loadCoreArcGISModules() {
         MapViewCtor,
         GeoJSONLayerCtor,
         FeatureLayerCtor,
+        TileLayerCtor,
         GraphicsLayerCtor,
         SketchViewModelCtor,
         PointCtor,
@@ -435,6 +444,7 @@ function loadCoreArcGISModules() {
         MapViewCtor,
         GeoJSONLayerCtor,
         FeatureLayerCtor,
+        TileLayerCtor,
         GraphicsLayerCtor,
         SketchViewModelCtor,
         PointCtor,
@@ -902,8 +912,19 @@ function createThemeLayer(
   kind: ThemeLayerKind,
   GeoJSONLayerCtor: GeoJSONLayerCtor,
   FeatureLayerCtor: FeatureLayerCtor,
+  TileLayerCtor: TileLayerCtor,
   visible: boolean,
 ) {
+  if (kind === 'topography') {
+    return new TileLayerCtor({
+      url: HILLSHADE_DATA_URL,
+      title: 'Terrain / elevation',
+      visible,
+      opacity: 0.3,
+      blendMode: 'normal',
+    })
+  }
+
   if (kind === 'solar') {
     return new GeoJSONLayerCtor({
       url: SOLAR_DATA_URL,
@@ -1134,6 +1155,7 @@ function createThemeLayer(
 }
 
 export const ArcGISMap = memo(function ArcGISMap({
+  topographyVisible,
   solarVisible,
   windVisible,
   solarFarmsVisible,
@@ -1157,12 +1179,14 @@ export const ArcGISMap = memo(function ArcGISMap({
   const sketchViewModelRef = useRef<SketchHandle | null>(null)
   const selectionGraphicRef = useRef<GraphicHandle | null>(null)
   const coreModulesRef = useRef<CoreModules | null>(null)
+  const topographyLayerRef = useRef<LayerHandle | null>(null)
   const solarLayerRef = useRef<LayerHandle | null>(null)
   const windLayerRef = useRef<LayerHandle | null>(null)
   const solarFarmsLayerRef = useRef<LayerHandle | null>(null)
   const windFarmsLayerRef = useRef<LayerHandle | null>(null)
   const powerLinesLayerRef = useRef<LayerHandle | null>(null)
   const boundingBoxSelectionActiveRef = useRef(boundingBoxSelectionActive)
+  const initialTopographyVisibleRef = useRef(topographyVisible)
   const initialSolarVisibleRef = useRef(solarVisible)
   const initialWindVisibleRef = useRef(windVisible)
   const initialSolarFarmsVisibleRef = useRef(solarFarmsVisible)
@@ -1179,6 +1203,10 @@ export const ArcGISMap = memo(function ArcGISMap({
 
     if (!map || !coreModules) {
       return null
+    }
+
+    if (kind === 'topography' && topographyLayerRef.current) {
+      return topographyLayerRef.current
     }
 
     if (kind === 'solar' && solarLayerRef.current) {
@@ -1205,19 +1233,23 @@ export const ArcGISMap = memo(function ArcGISMap({
       kind,
       coreModules.GeoJSONLayerCtor,
       coreModules.FeatureLayerCtor,
+      coreModules.TileLayerCtor,
       true,
     )
     const indexByKind: Record<ThemeLayerKind, number> = {
-      solar: 0,
-      wind: 1,
-      solarFarms: 2,
-      windFarms: 3,
-      powerLines: 4,
+      topography: 0,
+      solar: 1,
+      wind: 2,
+      solarFarms: 3,
+      windFarms: 4,
+      powerLines: 5,
     }
 
     map.add(layer, indexByKind[kind])
 
-    if (kind === 'solar') {
+    if (kind === 'topography') {
+      topographyLayerRef.current = layer
+    } else if (kind === 'solar') {
       solarLayerRef.current = layer
     } else if (kind === 'wind') {
       windLayerRef.current = layer
@@ -1241,7 +1273,7 @@ export const ArcGISMap = memo(function ArcGISMap({
     viewRef.current.goTo({ zoom: nextZoom }, { animate: true }).catch(() => {})
   }
 
-  const syncBoundingBoxFromGraphic = (graphic: GraphicHandle | null) => {
+  const syncBoundingBoxFromGraphic = useCallback((graphic: GraphicHandle | null) => {
     const extent = graphic?.geometry?.extent
     const coreModules = coreModulesRef.current
 
@@ -1272,9 +1304,9 @@ export const ArcGISMap = memo(function ArcGISMap({
       xmax: geographicExtent.xmax,
       ymax: geographicExtent.ymax,
     })
-  }
+  }, [onBoundingBoxSelect])
 
-  const beginSelectionEdit = () => {
+  const beginSelectionEdit = useCallback(() => {
     if (!selectionGraphicRef.current || !sketchViewModelRef.current) {
       return
     }
@@ -1288,7 +1320,7 @@ export const ArcGISMap = memo(function ArcGISMap({
       multipleSelectionEnabled: false,
       toggleToolOnClick: true,
     })
-  }
+  }, [])
 
   useEffect(() => {
     boundingBoxSelectionActiveRef.current = boundingBoxSelectionActive
@@ -1321,14 +1353,26 @@ export const ArcGISMap = memo(function ArcGISMap({
 
         mapRef.current = map
 
+        if (initialTopographyVisibleRef.current) {
+          topographyLayerRef.current = createThemeLayer(
+            'topography',
+            coreModules.GeoJSONLayerCtor,
+            coreModules.FeatureLayerCtor,
+            coreModules.TileLayerCtor,
+            true,
+          )
+          map.add(topographyLayerRef.current, 0)
+        }
+
         if (initialSolarVisibleRef.current) {
           solarLayerRef.current = createThemeLayer(
             'solar',
             coreModules.GeoJSONLayerCtor,
             coreModules.FeatureLayerCtor,
+            coreModules.TileLayerCtor,
             true,
           )
-          map.add(solarLayerRef.current, 0)
+          map.add(solarLayerRef.current, 1)
         }
 
         if (initialWindVisibleRef.current) {
@@ -1336,9 +1380,10 @@ export const ArcGISMap = memo(function ArcGISMap({
             'wind',
             coreModules.GeoJSONLayerCtor,
             coreModules.FeatureLayerCtor,
+            coreModules.TileLayerCtor,
             true,
           )
-          map.add(windLayerRef.current, solarLayerRef.current ? 1 : 0)
+          map.add(windLayerRef.current, 2)
         }
 
         if (initialSolarFarmsVisibleRef.current) {
@@ -1346,9 +1391,10 @@ export const ArcGISMap = memo(function ArcGISMap({
             'solarFarms',
             coreModules.GeoJSONLayerCtor,
             coreModules.FeatureLayerCtor,
+            coreModules.TileLayerCtor,
             true,
           )
-          map.add(solarFarmsLayerRef.current, 2)
+          map.add(solarFarmsLayerRef.current, 3)
         }
 
         if (initialWindFarmsVisibleRef.current) {
@@ -1356,9 +1402,10 @@ export const ArcGISMap = memo(function ArcGISMap({
             'windFarms',
             coreModules.GeoJSONLayerCtor,
             coreModules.FeatureLayerCtor,
+            coreModules.TileLayerCtor,
             true,
           )
-          map.add(windFarmsLayerRef.current, 3)
+          map.add(windFarmsLayerRef.current, 4)
         }
 
         if (initialPowerLinesVisibleRef.current) {
@@ -1366,9 +1413,10 @@ export const ArcGISMap = memo(function ArcGISMap({
             'powerLines',
             coreModules.GeoJSONLayerCtor,
             coreModules.FeatureLayerCtor,
+            coreModules.TileLayerCtor,
             true,
           )
-          map.add(powerLinesLayerRef.current, 4)
+          map.add(powerLinesLayerRef.current, 5)
         }
 
         const graphicsLayer = new coreModules.GraphicsLayerCtor()
@@ -1489,6 +1537,7 @@ export const ArcGISMap = memo(function ArcGISMap({
       interactingWatchHandle?.remove()
       updatingWatchHandle?.remove()
       selectionGraphicRef.current = null
+      topographyLayerRef.current = null
       solarLayerRef.current = null
       windLayerRef.current = null
       solarFarmsLayerRef.current = null
@@ -1502,7 +1551,17 @@ export const ArcGISMap = memo(function ArcGISMap({
       viewRef.current = null
       view?.destroy()
     }
-  }, [onBoundingBoxSelect, onBoundingBoxSelectionChange])
+  }, [beginSelectionEdit, onBoundingBoxSelectionChange, syncBoundingBoxFromGraphic])
+
+  useEffect(() => {
+    if (topographyVisible) {
+      ensureThemeLayer('topography')
+    }
+
+    if (topographyLayerRef.current) {
+      topographyLayerRef.current.visible = topographyVisible
+    }
+  }, [topographyVisible])
 
   useEffect(() => {
     if (solarVisible) {
@@ -1662,7 +1721,7 @@ export const ArcGISMap = memo(function ArcGISMap({
     }
 
     beginSelectionEdit()
-  }, [editSelectionRequest])
+  }, [beginSelectionEdit, editSelectionRequest])
 
   useEffect(() => {
     if (boundingBox !== null) {
