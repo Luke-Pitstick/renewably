@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { buildOptimizationFootprintRing } from './optimizationFootprints'
 
 type ArcGISMapProps = {
   topographyVisible: boolean
@@ -51,14 +52,19 @@ type OptimizationSite = {
   lat: number
   lon: number
   device_type: 'solar' | 'wind'
+  h3_index?: string
   solar_power_kwh: number
   wind_power_kwh: number
   solar_probability?: number
   wind_probability?: number
+  none_probability?: number
   expected_power_kwh?: number
   selected_power_kwh?: number
   device_cost_usd?: number
   effective_cost_usd?: number
+  installed_capacity_kw?: number
+  score?: number
+  chance_feature_source?: string
 }
 
 type LayerHandle = {
@@ -267,43 +273,6 @@ const WIND_FARM_ICON_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
     <path d="M20 39h8" stroke="#dff6ff" stroke-width="2.8" stroke-linecap="round"/>
   </svg>`,
 )}`
-
-function createPinMarkerUrl(kind: 'solar' | 'wind') {
-  const accent = kind === 'solar' ? '#d8ff6d' : '#9fe7ff'
-  const fill = kind === 'solar' ? '#1d3d31' : '#193848'
-  const inner =
-    kind === 'solar'
-      ? `
-        <rect x="16" y="15" width="20" height="11" rx="2.2" fill="#17312a" stroke="${accent}" stroke-width="1.8"/>
-        <path d="M21 15v11M26 15v11M31 15v11M16 20.5h20" stroke="#8fe2b8" stroke-width="1.35" opacity="0.95"/>
-        <path d="M26 26v5.5" stroke="${accent}" stroke-width="1.8" stroke-linecap="round"/>
-        <path d="M22.5 31.5h7" stroke="${accent}" stroke-width="1.8" stroke-linecap="round"/>
-      `
-      : `
-        <path d="M26 17v13.5" stroke="#dff6ff" stroke-width="2.1" stroke-linecap="round"/>
-        <circle cx="26" cy="15" r="2.1" fill="#dff6ff"/>
-        <path d="M26 15L16 18.2" stroke="#8cd6ff" stroke-width="2.1" stroke-linecap="round"/>
-        <path d="M26 15L33.2 10" stroke="#68f0cb" stroke-width="2.1" stroke-linecap="round"/>
-        <path d="M26 15L30.4 25" stroke="#d8ff6d" stroke-width="2.1" stroke-linecap="round"/>
-        <path d="M22.8 33h6.4" stroke="#dff6ff" stroke-width="2.1" stroke-linecap="round"/>
-      `
-
-  return `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 64">
-      <defs>
-        <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
-          <feDropShadow dx="0" dy="4" stdDeviation="3.4" flood-color="rgba(0,0,0,0.34)"/>
-        </filter>
-      </defs>
-      <path d="M26 4C15.5 4 7 12.5 7 23c0 14.4 16.2 27.9 18.1 29.5a1.5 1.5 0 0 0 1.8 0C28.8 50.9 45 37.4 45 23 45 12.5 36.5 4 26 4Z" fill="${fill}" stroke="${accent}" stroke-width="2.4" filter="url(#shadow)"/>
-      <circle cx="26" cy="23" r="13.5" fill="rgba(10,16,18,0.22)" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
-      ${inner}
-    </svg>`,
-  )}`
-}
-
-const SOLAR_OPTIMIZATION_PIN_URL = createPinMarkerUrl('solar')
-const WIND_OPTIMIZATION_PIN_URL = createPinMarkerUrl('wind')
 
 const PARTICLE_STYLE_PALETTE: ParticleStyle[] = Array.from(
   { length: 10 },
@@ -1686,10 +1655,10 @@ export const ArcGISMap = memo(function ArcGISMap({
         isSolarSite ? site.solar_power_kwh : site.wind_power_kwh
 
       const graphic = new coreModules.GraphicCtor({
-        geometry: new coreModules.PointCtor({
-          longitude: site.lon,
-          latitude: site.lat,
-        }),
+        geometry: {
+          type: 'polygon',
+          rings: [buildOptimizationFootprintRing(site)],
+        },
         attributes: {
           deviceType: isSolarSite ? 'Solar' : 'Wind',
           selectedOutputKwh: Number(selectedOutput.toFixed(2)),
@@ -1707,13 +1676,16 @@ export const ArcGISMap = memo(function ArcGISMap({
               : null,
         },
         symbol: {
-          type: 'picture-marker',
-          url:
-            isSolarSite
-              ? SOLAR_OPTIMIZATION_PIN_URL
-              : WIND_OPTIMIZATION_PIN_URL,
-          width: '32px',
-          height: '40px',
+          type: 'simple-fill',
+          color: isSolarSite
+            ? [194, 255, 118, 0.26]
+            : [122, 227, 255, 0.24],
+          outline: {
+            color: isSolarSite
+              ? [224, 255, 140, 0.95]
+              : [176, 242, 255, 0.92],
+            width: 1.6,
+          },
         },
       })
 
