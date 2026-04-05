@@ -1,7 +1,6 @@
 import { startTransition, useDeferredValue, useEffect, useState } from 'react'
 import './App.css'
 import { ArcGISMap } from './ArcGISMap'
-import { buildOptimizationFootprintRing } from './optimizationFootprints'
 
 type OptimizationMode = 'cash' | 'power'
 
@@ -38,19 +37,14 @@ type OptimizationPoint = {
   lat: number
   lon: number
   device_type: 'solar' | 'wind'
-  h3_index?: string
   solar_power_kwh: number
   wind_power_kwh: number
   solar_probability?: number
   wind_probability?: number
-  none_probability?: number
-  chance_feature_source?: string
   expected_power_kwh?: number
   selected_power_kwh?: number
   device_cost_usd?: number
   effective_cost_usd?: number
-  installed_capacity_kw?: number
-  score?: number
 }
 
 type OptimizationResponse = {
@@ -67,18 +61,18 @@ type OptimizationResponse = {
   points?: OptimizationPoint[]
 }
 
-type GeoJsonPolygonFeature = {
+type GeoJsonPointFeature = {
   type: 'Feature'
   geometry: {
-    type: 'Polygon'
-    coordinates: number[][][]
+    type: 'Point'
+    coordinates: [number, number]
   }
-  properties: Record<string, number | string | boolean | null>
+  properties: Record<string, number | string>
 }
 
 type GeoJsonFeatureCollection = {
   type: 'FeatureCollection'
-  features: GeoJsonPolygonFeature[]
+  features: GeoJsonPointFeature[]
 }
 
 const API_BASE_URL =
@@ -89,34 +83,6 @@ const LOCATION_SUGGEST_URL =
 
 function isFiniteCoordinate(value: number) {
   return Number.isFinite(value)
-}
-
-function buildOptimizationFeatureProperties(
-  point: OptimizationPoint,
-  index: number,
-) {
-  const entries = Object.entries(point).flatMap(([key, value]) => {
-    if (value === undefined) {
-      return []
-    }
-
-    if (
-      typeof value === 'number' ||
-      typeof value === 'string' ||
-      typeof value === 'boolean' ||
-      value === null
-    ) {
-      return [[key, value] as const]
-    }
-
-    return [[key, JSON.stringify(value)] as const]
-  })
-
-  return {
-    site_id: index + 1,
-    geometry_kind: 'footprint_polygon',
-    ...Object.fromEntries(entries),
-  }
 }
 
 function buildOptimizationGeoJson(points: OptimizationPoint[]): GeoJsonFeatureCollection {
@@ -131,10 +97,33 @@ function buildOptimizationGeoJson(points: OptimizationPoint[]): GeoJsonFeatureCo
         {
           type: 'Feature' as const,
           geometry: {
-            type: 'Polygon' as const,
-            coordinates: [buildOptimizationFootprintRing(point)],
+            type: 'Point' as const,
+            coordinates: [point.lon, point.lat] as [number, number],
           },
-          properties: buildOptimizationFeatureProperties(point, index),
+          properties: {
+            site_id: index + 1,
+            device_type: point.device_type,
+            solar_power_kwh: point.solar_power_kwh,
+            wind_power_kwh: point.wind_power_kwh,
+            ...(point.solar_probability !== undefined
+              ? { solar_probability: point.solar_probability }
+              : {}),
+            ...(point.wind_probability !== undefined
+              ? { wind_probability: point.wind_probability }
+              : {}),
+            ...(point.expected_power_kwh !== undefined
+              ? { expected_power_kwh: point.expected_power_kwh }
+              : {}),
+            ...(point.selected_power_kwh !== undefined
+              ? { selected_power_kwh: point.selected_power_kwh }
+              : {}),
+            ...(point.device_cost_usd !== undefined
+              ? { device_cost_usd: point.device_cost_usd }
+              : {}),
+            ...(point.effective_cost_usd !== undefined
+              ? { effective_cost_usd: point.effective_cost_usd }
+              : {}),
+          },
         },
       ]
     }),
@@ -363,7 +352,7 @@ function App() {
     const dateStamp = new Date().toISOString().slice(0, 10)
 
     link.href = downloadUrl
-    link.download = `renewably-${optimizationResult.mode}-optimization-footprints-${dateStamp}.geojson`
+    link.download = `renewably-${optimizationResult.mode}-optimization-sites-${dateStamp}.geojson`
     document.body.append(link)
     link.click()
     link.remove()
