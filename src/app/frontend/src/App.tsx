@@ -21,6 +21,40 @@ type EditSelectionRequest = {
   id: number
 }
 
+type OptimizationFocusRequest = {
+  id: number
+  boundingBox: BoundingBox
+}
+
+type OptimizationPoint = {
+  lat: number
+  lon: number
+  device_type: 'solar' | 'wind'
+  solar_power_kwh: number
+  wind_power_kwh: number
+  solar_probability?: number
+  wind_probability?: number
+  expected_power_kwh?: number
+  selected_power_kwh?: number
+  device_cost_usd?: number
+  effective_cost_usd?: number
+}
+
+type OptimizationResponse = {
+  selected_count: number
+  mode: OptimizationMode
+  sample_count: number
+  total_cost_usd?: number
+  total_actual_cost_usd?: number
+  total_expected_power_kwh?: number
+  total_power_kwh?: number
+  total_raw_power_kwh?: number
+  total_effective_cost_usd?: number
+  power_basis?: string
+  power_window_hours?: number
+  points?: OptimizationPoint[]
+}
+
 const BRAND_SIGNALS = [
   {
     value: 'Grid-aware',
@@ -54,8 +88,16 @@ const BRAND_PILLARS = [
   },
 ]
 
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ??
+  'http://127.0.0.1:8000'
+
 function formatModeLabel(mode: OptimizationMode) {
   return mode === 'cash' ? 'Cash optimization' : 'Power optimization'
+}
+
+function formatRoundedValue(value: number) {
+  return Math.round(value).toLocaleString()
 }
 
 function App() {
@@ -80,11 +122,22 @@ function App() {
     useState<LocationSearchRequest | null>(null)
   const [editSelectionRequest, setEditSelectionRequest] =
     useState<EditSelectionRequest | null>(null)
+  const [optimizationSubmitting, setOptimizationSubmitting] = useState(false)
+  const [optimizationStatusMessage, setOptimizationStatusMessage] = useState('')
+  const [optimizationResult, setOptimizationResult] =
+    useState<OptimizationResponse | null>(null)
+  const [optimizationFocusRequest, setOptimizationFocusRequest] =
+    useState<OptimizationFocusRequest | null>(null)
 
   const parameterValue = optimizationValue.trim()
-  const parameterReady = parameterValue.length > 0
+  const optimizationTargetValue = Number(parameterValue)
+  const parameterReady =
+    parameterValue.length > 0 &&
+    Number.isFinite(optimizationTargetValue) &&
+    optimizationTargetValue > 0
   const hasBoundingBox = boundingBox !== null
-  const submitReady = parameterReady && hasBoundingBox
+  const canSubmitOptimization =
+    parameterReady && hasBoundingBox && !optimizationSubmitting
   const activeLayerCount =
     Number(topographyVisible) +
     Number(solarVisible) +
@@ -106,12 +159,18 @@ function App() {
       : '--'
   const parameterSummary = parameterReady
     ? `${optimizationMode === 'cash' ? '$' : ''}${parameterValue} ${inputUnit}`
-    : 'Waiting for parameters'
+    : 'Enter a positive numeric value'
   const areaSummary = hasBoundingBox
     ? 'Polygon selected'
     : selectedAreaLabel
       ? `Centered on ${selectedAreaLabel}`
       : 'No area selected'
+
+  const clearOptimizationArtifacts = () => {
+    setOptimizationResult(null)
+    setOptimizationFocusRequest(null)
+    setOptimizationStatusMessage('')
+  }
 
   const launchWorkspace = (openWorkflow = false) => {
     startTransition(() => {
@@ -146,6 +205,7 @@ function App() {
 
   const beginPolygonDraw = () => {
     startTransition(() => {
+      clearOptimizationArtifacts()
       setWorkflowModalOpen(false)
       setLayerMenuOpen(false)
       setSelectedAreaLabel(null)
@@ -155,6 +215,7 @@ function App() {
 
   const deleteSelection = () => {
     startTransition(() => {
+      clearOptimizationArtifacts()
       setBoundingBoxSelectionActive(false)
       setBoundingBox(null)
       setWorkflowModalOpen(false)
@@ -170,8 +231,13 @@ function App() {
     beginPolygonDraw()
   }
 
+  const closeOptimizationResults = () => {
+    clearOptimizationArtifacts()
+  }
+
   const handleBoundingBoxSelect = (nextBoundingBox: BoundingBox | null) => {
     startTransition(() => {
+      clearOptimizationArtifacts()
       setBoundingBox(nextBoundingBox)
 
       if (nextBoundingBox) {
@@ -179,6 +245,56 @@ function App() {
         setBoundingBoxSelectionActive(false)
       }
     })
+  }
+
+  const submitOptimizationRequest = async () => {
+    if (!boundingBox || !canSubmitOptimization) {
+      return
+    }
+
+    setOptimizationSubmitting(true)
+    setOptimizationStatusMessage('Submitting optimization request...')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/optimize`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: optimizationMode,
+          target_value: optimizationTargetValue,
+          bounding_box: boundingBox,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null)
+        throw new Error(errorBody?.detail ?? 'Optimization request failed')
+      }
+
+      const result = (await response.json()) as OptimizationResponse
+      setOptimizationResult(result)
+      setOptimizationFocusRequest({
+        id: Date.now(),
+        boundingBox,
+      })
+      setWorkflowModalOpen(false)
+      setBoundingBoxSelectionActive(false)
+
+      const summary =
+        optimizationMode === 'cash'
+          ? `${result.selected_count} sites selected · expected output ${formatRoundedValue(result.total_expected_power_kwh ?? 0)} kWh`
+          : `${result.selected_count} sites selected · actual cost ${formatRoundedValue(result.total_actual_cost_usd ?? 0)} USD`
+
+      setOptimizationStatusMessage(summary)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Optimization request failed'
+      setOptimizationStatusMessage(message)
+    } finally {
+      setOptimizationSubmitting(false)
+    }
   }
 
   if (screen === 'home') {
@@ -268,15 +384,23 @@ function App() {
                 <div className="home-brief-list">
                   <div>
                     <strong>Cleaner first impression</strong>
-                    <span>Designed like a real product, not a bare map proof-of-concept.</span>
+                    <span>
+                      Designed like a real product, not a bare map proof-of-concept.
+                    </span>
                   </div>
                   <div>
                     <strong>Spatial clarity</strong>
-                    <span>Draw the footprint, then tune the brief around a concrete area.</span>
+                    <span>
+                      Draw the footprint, then tune the brief around a concrete
+                      area.
+                    </span>
                   </div>
                   <div>
                     <strong>Stakeholder-ready</strong>
-                    <span>Useful for origination reviews, site screening, and internal demos.</span>
+                    <span>
+                      Useful for origination reviews, site screening, and internal
+                      demos.
+                    </span>
                   </div>
                 </div>
               </article>
@@ -357,6 +481,8 @@ function App() {
             solarFarmsVisible={solarFarmsVisible}
             windFarmsVisible={windFarmsVisible}
             powerLinesVisible={powerLinesVisible}
+            optimizationSites={optimizationResult?.points ?? []}
+            optimizationFocusRequest={optimizationFocusRequest}
             boundingBox={boundingBox}
             boundingBoxSelectionActive={boundingBoxSelectionActive}
             editSelectionRequest={editSelectionRequest}
@@ -531,6 +657,107 @@ function App() {
             </div>
           </div>
 
+          {optimizationResult ? (
+            <div className="map-overlay overlay-optimization-results">
+              <div className="legend-header overlay-results-header">
+                <div>
+                  <p className="panel-label">Optimization results</p>
+                  <span className="legend-unit">Live</span>
+                </div>
+                <button
+                  type="button"
+                  className="overlay-close-button"
+                  onClick={closeOptimizationResults}
+                  aria-label="Close optimization results"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="overlay-results-grid">
+                <div className="result-row">
+                  <span>Mode</span>
+                  <strong>
+                    {optimizationResult.mode === 'cash'
+                      ? 'Budget target'
+                      : 'Power target'}
+                  </strong>
+                </div>
+                <div className="result-row">
+                  <span>Sampled points</span>
+                  <strong>{optimizationResult.sample_count.toLocaleString()}</strong>
+                </div>
+                <div className="result-row">
+                  <span>Selected sites</span>
+                  <strong>{optimizationResult.selected_count.toLocaleString()}</strong>
+                </div>
+                {optimizationResult.power_basis === 'average_hourly_kwh' ? (
+                  <div className="result-row">
+                    <span>Output basis</span>
+                    <strong>Average hourly kWh</strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_expected_power_kwh !== undefined ? (
+                  <div className="result-row">
+                    <span>Expected output</span>
+                    <strong>
+                      {formatRoundedValue(
+                        optimizationResult.total_expected_power_kwh,
+                      )}{' '}
+                      kWh
+                    </strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_raw_power_kwh !== undefined ? (
+                  <div className="result-row">
+                    <span>Raw output</span>
+                    <strong>
+                      {formatRoundedValue(optimizationResult.total_raw_power_kwh)}{' '}
+                      kWh
+                    </strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_cost_usd !== undefined ? (
+                  <div className="result-row">
+                    <span>Total cost</span>
+                    <strong>
+                      {formatRoundedValue(optimizationResult.total_cost_usd)} USD
+                    </strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_power_kwh !== undefined ? (
+                  <div className="result-row">
+                    <span>Total output</span>
+                    <strong>
+                      {formatRoundedValue(optimizationResult.total_power_kwh)} kWh
+                    </strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_actual_cost_usd !== undefined ? (
+                  <div className="result-row">
+                    <span>Actual cost</span>
+                    <strong>
+                      {formatRoundedValue(
+                        optimizationResult.total_actual_cost_usd,
+                      )}{' '}
+                      USD
+                    </strong>
+                  </div>
+                ) : null}
+                {optimizationResult.total_effective_cost_usd !== undefined ? (
+                  <div className="result-row">
+                    <span>Effective cost</span>
+                    <strong>
+                      {formatRoundedValue(
+                        optimizationResult.total_effective_cost_usd,
+                      )}{' '}
+                      USD
+                    </strong>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="map-action-stack">
             <button
               type="button"
@@ -637,6 +864,7 @@ function App() {
                 <div className="field-shell">
                   <input
                     type="text"
+                    inputMode="decimal"
                     value={optimizationValue}
                     onChange={(event) => setOptimizationValue(event.target.value)}
                     placeholder={inputPlaceholder}
@@ -700,6 +928,7 @@ function App() {
                     }
 
                     startTransition(() => {
+                      setBoundingBoxSelectionActive(false)
                       setEditSelectionRequest({
                         id: Date.now(),
                       })
@@ -749,7 +978,7 @@ function App() {
                   <h2 className="section-title">Optimization request</h2>
                 </div>
                 <span className="status-badge">
-                  {submitReady ? 'Ready' : 'Step 4'}
+                  {canSubmitOptimization ? 'Ready' : 'Step 4'}
                 </span>
               </div>
 
@@ -775,10 +1004,19 @@ function App() {
               <button
                 type="button"
                 className="primary-button"
-                disabled={!submitReady}
+                disabled={!canSubmitOptimization}
+                onClick={() => {
+                  void submitOptimizationRequest()
+                }}
               >
-                Submit Optimization Request
+                {optimizationSubmitting
+                  ? 'Submitting...'
+                  : 'Submit Optimization Request'}
               </button>
+
+              {optimizationStatusMessage ? (
+                <p className="workflow-status">{optimizationStatusMessage}</p>
+              ) : null}
             </section>
           </section>
         </div>

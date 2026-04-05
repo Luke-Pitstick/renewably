@@ -7,6 +7,11 @@ type ArcGISMapProps = {
   solarFarmsVisible: boolean
   windFarmsVisible: boolean
   powerLinesVisible: boolean
+  optimizationSites: OptimizationSite[]
+  optimizationFocusRequest: {
+    id: number
+    boundingBox: NumericBbox
+  } | null
   boundingBox: {
     xmin: number
     ymin: number
@@ -38,6 +43,20 @@ type ThemeLayerKind =
   | 'windFarms'
   | 'powerLines'
 
+type OptimizationSite = {
+  lat: number
+  lon: number
+  device_type: 'solar' | 'wind'
+  solar_power_kwh: number
+  wind_power_kwh: number
+  solar_probability?: number
+  wind_probability?: number
+  expected_power_kwh?: number
+  selected_power_kwh?: number
+  device_cost_usd?: number
+  effective_cost_usd?: number
+}
+
 type LayerHandle = {
   visible: boolean
 }
@@ -47,6 +66,7 @@ type MapHandle = {
 }
 
 type GraphicsLayerHandle = {
+  add: (graphic: unknown) => void
   removeAll: () => void
 }
 
@@ -92,6 +112,8 @@ type ArcGISPointCtor = new (properties: {
   latitude: number
 }) => unknown
 
+type GraphicCtor = new (properties?: Record<string, unknown>) => GraphicHandle
+
 type MapCtor = new (properties?: Record<string, unknown>) => MapHandle
 type MapViewCtor = new (properties?: Record<string, unknown>) => ViewHandle
 type GeoJSONLayerCtor = new (properties?: Record<string, unknown>) => LayerHandle
@@ -117,6 +139,7 @@ type CoreModules = {
   GraphicsLayerCtor: GraphicsLayerCtor
   SketchViewModelCtor: SketchViewModelCtor
   PointCtor: ArcGISPointCtor
+  GraphicCtor: GraphicCtor
   webMercatorUtils: WebMercatorUtilsHandle
 }
 
@@ -240,6 +263,43 @@ const WIND_FARM_ICON_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
   </svg>`,
 )}`
 
+function createPinMarkerUrl(kind: 'solar' | 'wind') {
+  const accent = kind === 'solar' ? '#d8ff6d' : '#9fe7ff'
+  const fill = kind === 'solar' ? '#1d3d31' : '#193848'
+  const inner =
+    kind === 'solar'
+      ? `
+        <rect x="16" y="15" width="20" height="11" rx="2.2" fill="#17312a" stroke="${accent}" stroke-width="1.8"/>
+        <path d="M21 15v11M26 15v11M31 15v11M16 20.5h20" stroke="#8fe2b8" stroke-width="1.35" opacity="0.95"/>
+        <path d="M26 26v5.5" stroke="${accent}" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M22.5 31.5h7" stroke="${accent}" stroke-width="1.8" stroke-linecap="round"/>
+      `
+      : `
+        <path d="M26 17v13.5" stroke="#dff6ff" stroke-width="2.1" stroke-linecap="round"/>
+        <circle cx="26" cy="15" r="2.1" fill="#dff6ff"/>
+        <path d="M26 15L16 18.2" stroke="#8cd6ff" stroke-width="2.1" stroke-linecap="round"/>
+        <path d="M26 15L33.2 10" stroke="#68f0cb" stroke-width="2.1" stroke-linecap="round"/>
+        <path d="M26 15L30.4 25" stroke="#d8ff6d" stroke-width="2.1" stroke-linecap="round"/>
+        <path d="M22.8 33h6.4" stroke="#dff6ff" stroke-width="2.1" stroke-linecap="round"/>
+      `
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 64">
+      <defs>
+        <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="0" dy="4" stdDeviation="3.4" flood-color="rgba(0,0,0,0.34)"/>
+        </filter>
+      </defs>
+      <path d="M26 4C15.5 4 7 12.5 7 23c0 14.4 16.2 27.9 18.1 29.5a1.5 1.5 0 0 0 1.8 0C28.8 50.9 45 37.4 45 23 45 12.5 36.5 4 26 4Z" fill="${fill}" stroke="${accent}" stroke-width="2.4" filter="url(#shadow)"/>
+      <circle cx="26" cy="23" r="13.5" fill="rgba(10,16,18,0.22)" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>
+      ${inner}
+    </svg>`,
+  )}`
+}
+
+const SOLAR_OPTIMIZATION_PIN_URL = createPinMarkerUrl('solar')
+const WIND_OPTIMIZATION_PIN_URL = createPinMarkerUrl('wind')
+
 const PARTICLE_STYLE_PALETTE: ParticleStyle[] = Array.from(
   { length: 10 },
   (_, index) => {
@@ -353,6 +413,7 @@ function loadCoreArcGISModules() {
         GraphicsLayerCtor,
         SketchViewModelCtor,
         ArcGISPointCtor,
+        GraphicCtor,
         WebMercatorUtilsHandle,
       ]
     >([
@@ -364,6 +425,7 @@ function loadCoreArcGISModules() {
       'esri/layers/GraphicsLayer',
       'esri/widgets/Sketch/SketchViewModel',
       'esri/geometry/Point',
+      'esri/Graphic',
       'esri/geometry/support/webMercatorUtils',
     ]).then(
       ([
@@ -375,6 +437,7 @@ function loadCoreArcGISModules() {
         GraphicsLayerCtor,
         SketchViewModelCtor,
         PointCtor,
+        GraphicCtor,
         webMercatorUtils,
       ]) => ({
         MapCtor,
@@ -385,6 +448,7 @@ function loadCoreArcGISModules() {
         GraphicsLayerCtor,
         SketchViewModelCtor,
         PointCtor,
+        GraphicCtor,
         webMercatorUtils,
       }),
     )
@@ -1097,6 +1161,8 @@ export const ArcGISMap = memo(function ArcGISMap({
   solarFarmsVisible,
   windFarmsVisible,
   powerLinesVisible,
+  optimizationSites,
+  optimizationFocusRequest,
   boundingBox,
   boundingBoxSelectionActive,
   editSelectionRequest,
@@ -1109,6 +1175,7 @@ export const ArcGISMap = memo(function ArcGISMap({
   const mapRef = useRef<MapHandle | null>(null)
   const viewRef = useRef<ViewHandle | null>(null)
   const graphicsLayerRef = useRef<GraphicsLayerHandle | null>(null)
+  const optimizationGraphicsLayerRef = useRef<GraphicsLayerHandle | null>(null)
   const sketchViewModelRef = useRef<SketchHandle | null>(null)
   const selectionGraphicRef = useRef<GraphicHandle | null>(null)
   const coreModulesRef = useRef<CoreModules | null>(null)
@@ -1208,17 +1275,34 @@ export const ArcGISMap = memo(function ArcGISMap({
 
   const syncBoundingBoxFromGraphic = useCallback((graphic: GraphicHandle | null) => {
     const extent = graphic?.geometry?.extent
+    const coreModules = coreModulesRef.current
 
     if (!extent) {
       onBoundingBoxSelect(null)
       return
     }
 
+    const geographicExtent = coreModules?.webMercatorUtils
+      ? (coreModules.webMercatorUtils.webMercatorToGeographic(
+          extent as unknown as Record<string, unknown>,
+        ) as NumericBbox)
+      : extent
+
+    if (
+      typeof geographicExtent.xmin !== 'number' ||
+      typeof geographicExtent.ymin !== 'number' ||
+      typeof geographicExtent.xmax !== 'number' ||
+      typeof geographicExtent.ymax !== 'number'
+    ) {
+      onBoundingBoxSelect(null)
+      return
+    }
+
     onBoundingBoxSelect({
-      xmin: extent.xmin,
-      ymin: extent.ymin,
-      xmax: extent.xmax,
-      ymax: extent.ymax,
+      xmin: geographicExtent.xmin,
+      ymin: geographicExtent.ymin,
+      xmax: geographicExtent.xmax,
+      ymax: geographicExtent.ymax,
     })
   }, [onBoundingBoxSelect])
 
@@ -1339,6 +1423,10 @@ export const ArcGISMap = memo(function ArcGISMap({
         map.add(graphicsLayer)
         graphicsLayerRef.current = graphicsLayer
 
+        const optimizationGraphicsLayer = new coreModules.GraphicsLayerCtor()
+        map.add(optimizationGraphicsLayer)
+        optimizationGraphicsLayerRef.current = optimizationGraphicsLayer
+
         view = new coreModules.MapViewCtor({
           container: mapElementRef.current,
           map,
@@ -1456,6 +1544,7 @@ export const ArcGISMap = memo(function ArcGISMap({
       windFarmsLayerRef.current = null
       powerLinesLayerRef.current = null
       graphicsLayerRef.current = null
+      optimizationGraphicsLayerRef.current = null
       sketchViewModelRef.current = null
       coreModulesRef.current = null
       mapRef.current = null
@@ -1523,6 +1612,93 @@ export const ArcGISMap = memo(function ArcGISMap({
       powerLinesLayerRef.current.visible = powerLinesVisible
     }
   }, [powerLinesVisible])
+
+  useEffect(() => {
+    const optimizationLayer = optimizationGraphicsLayerRef.current
+    const coreModules = coreModulesRef.current
+
+    if (!optimizationLayer || !coreModules) {
+      return
+    }
+
+    optimizationLayer.removeAll()
+
+    for (const site of optimizationSites) {
+      const isSolarSite = site.device_type === 'solar'
+      const selectedOutput =
+        isSolarSite ? site.solar_power_kwh : site.wind_power_kwh
+      const popupFieldInfos = [
+        {
+          fieldName: 'selectedOutputKwh',
+          label: isSolarSite
+            ? 'Solar output (kWh)'
+            : 'Wind output (kWh)',
+          format: { digitSeparator: true, places: 2 },
+        },
+        {
+          fieldName: 'expectedOutputKwh',
+          label: 'Probability-adjusted output (kWh)',
+          format: { digitSeparator: true, places: 2 },
+        },
+        {
+          fieldName: 'deviceCostUsd',
+          label: isSolarSite ? 'Solar device cost (USD)' : 'Wind device cost (USD)',
+          format: { digitSeparator: true, places: 2 },
+        },
+      ]
+
+      if (site.effective_cost_usd !== undefined) {
+        popupFieldInfos.push({
+          fieldName: 'effectiveCostUsd',
+          label: 'Effective cost (USD)',
+          format: { digitSeparator: true, places: 2 },
+        })
+      }
+
+      const graphic = new coreModules.GraphicCtor({
+        geometry: new coreModules.PointCtor({
+          longitude: site.lon,
+          latitude: site.lat,
+        }),
+        attributes: {
+          deviceType: isSolarSite ? 'Solar' : 'Wind',
+          selectedOutputKwh: Number(selectedOutput.toFixed(2)),
+          expectedOutputKwh:
+            site.expected_power_kwh !== undefined
+              ? Number(site.expected_power_kwh.toFixed(2))
+              : null,
+          deviceCostUsd:
+            site.device_cost_usd !== undefined
+              ? Number(site.device_cost_usd.toFixed(2))
+              : null,
+          effectiveCostUsd:
+            site.effective_cost_usd !== undefined
+              ? Number(site.effective_cost_usd.toFixed(2))
+              : null,
+        },
+        symbol: {
+          type: 'picture-marker',
+          url:
+            isSolarSite
+              ? SOLAR_OPTIMIZATION_PIN_URL
+              : WIND_OPTIMIZATION_PIN_URL,
+          width: '32px',
+          height: '40px',
+        },
+        popupTemplate: {
+          title: '{deviceType} optimization site',
+          content: [
+            {
+              type: 'fields',
+              fieldInfos: popupFieldInfos,
+            },
+          ],
+        },
+      })
+
+      optimizationLayer.add(graphic)
+    }
+  }, [optimizationSites, mapReadyToken])
 
   useEffect(() => {
     if (!sketchViewModelRef.current || !graphicsLayerRef.current) {
@@ -1641,6 +1817,31 @@ export const ArcGISMap = memo(function ArcGISMap({
       })
       .catch(() => {})
   }, [locationSearchRequest])
+
+  useEffect(() => {
+    const view = viewRef.current
+    const coreModules = coreModulesRef.current
+
+    if (!optimizationFocusRequest || !view || !coreModules) {
+      return
+    }
+
+    const southWest = new coreModules.PointCtor({
+      longitude: optimizationFocusRequest.boundingBox.xmin,
+      latitude: optimizationFocusRequest.boundingBox.ymin,
+    })
+    const northEast = new coreModules.PointCtor({
+      longitude: optimizationFocusRequest.boundingBox.xmax,
+      latitude: optimizationFocusRequest.boundingBox.ymax,
+    })
+
+    view
+      .goTo(
+        [southWest, northEast],
+        { animate: true },
+      )
+      .catch(() => {})
+  }, [optimizationFocusRequest])
 
   useEffect(() => {
     let cancelled = false

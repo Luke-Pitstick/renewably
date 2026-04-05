@@ -1,5 +1,6 @@
-import numpy as np
 import math
+
+import numpy as np
 
 def weibull_pdf(v, k, c):
     return (k / c) * (v / c)**(k - 1) * np.exp(-(v / c)**k)
@@ -39,8 +40,3 @@ def estimate_aep_from_mean_speed(mean_speed_10m,
         "annual_energy_kwh": aep_kwh,
         "capacity_factor": avg_power_kw / rated_power_kw
     }
-
-result = estimate_aep_from_mean_speed(mean_speed_10m=5.5)
-
-for k, v in result.items():
-    print(k, v)

@@ -711,6 +711,13 @@
   background: #2dd4a8;
 }
 
+.workflow-status {
+  margin: 0;
+  color: rgba(194, 239, 212, 0.8);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .workflow-modal-backdrop {
   position: absolute;
   inset: 0;
@@ -831,7 +838,8 @@
 .zoom-button,
 .map-layer-trigger,
 .map-layer-panel,
-.overlay-legend {
+.overlay-legend,
+.overlay-optimization-results {
   background: rgba(57, 55, 55, 0.2);
   border-radius: 16px;
   box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
@@ -1189,6 +1197,70 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+.overlay-optimization-results {
+  top: 152px;
+  left: 16px;
+  z-index: 4;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100% - 230px);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow-y: auto;
+}
+
+.overlay-results-header {
+  align-items: flex-start;
+}
+
+.overlay-results-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.result-row span {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.result-row strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  text-align: right;
+}
+
+.overlay-close-button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.overlay-close-button:hover,
+.overlay-close-button:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  outline: none;
+}
+
 .legend-header {
   display: flex;
   align-items: center;
@@ -1282,6 +1354,16 @@
   .map-stage {
     height: 100svh;
   }
+
+  .map-frame {
+    min-height: 70svh;
+  }
+
+  .overlay-optimization-results {
+    top: auto;
+    bottom: 96px;
+    max-height: min(45svh, 360px);
+  }
 }
 
 @media (max-width: 760px) {
@@ -1352,8 +1434,16 @@
     align-items: stretch;
   }
 
-  .overlay-legend {
+  .overlay-legend,
+  .overlay-optimization-results {
     width: auto;
+  }
+
+  .overlay-optimization-results {
+    left: 12px;
+    right: 12px;
+    bottom: 72px;
+    max-height: min(42svh, 320px);
   }
 
   .map-layer-panel {
