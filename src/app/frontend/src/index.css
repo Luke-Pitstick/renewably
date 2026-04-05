@@ -1,60 +1,18 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
 
 :root {
   font-family: 'IBM Plex Sans', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #ece8df;
-  background: #151614;
+  color: #fff;
+  background: #1a1a1a;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  --text-main: #efebe3;
-  --text-muted: rgba(217, 211, 197, 0.62);
-  --accent-soft: #c8a16e;
-  --accent-bright: #d7bc92;
-  --panel-surface: rgba(45, 44, 41, 0.92);
-  --panel-surface-strong: rgba(56, 54, 50, 0.96);
-  --panel-overlay: rgba(16, 17, 16, 0.32);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --panel-border-strong: rgba(208, 168, 109, 0.2);
-  --panel-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
-  --glass-surface: var(--panel-surface);
-  --glass-overlay: var(--panel-overlay);
-  --glass-border: var(--panel-border);
-  --glass-border-strong: var(--panel-border-strong);
-  --glass-shadow: var(--panel-shadow);
-  --glass-blur: blur(18px) saturate(110%);
-  /* Map floating controls — neutral glass (https://css.glass) */
-  --map-glass-bg: rgba(26, 26, 26, 0.24);
-  --map-glass-bg-hover: rgba(26, 26, 26, 0.34);
-  --map-glass-blur: blur(5.3px);
-  --map-glass-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-  --map-glass-radius: 16px;
-
-  --sidebar-shell:
-    radial-gradient(circle at top left, rgba(102, 208, 152, 0.26), transparent 30%),
-    radial-gradient(circle at 80% 15%, rgba(163, 223, 143, 0.16), transparent 22%),
-    linear-gradient(180deg, #202a28 0%, #18201f 42%, #141716 100%);
-  --sidebar-bg: rgba(24, 35, 31, 0.8);
-  --sidebar-surface:
-    linear-gradient(180deg, rgba(36, 54, 49, 0.94), rgba(25, 35, 33, 0.94));
-  --sidebar-control:
-    linear-gradient(180deg, rgba(42, 65, 59, 0.9), rgba(30, 42, 39, 0.92));
-  --sidebar-control-active:
-    linear-gradient(135deg, rgba(82, 154, 116, 0.98), rgba(46, 99, 77, 0.94));
-  --sidebar-border: rgba(214, 241, 227, 0.1);
-  --sidebar-border-strong: rgba(140, 230, 181, 0.42);
-  --sidebar-primary:
-    linear-gradient(135deg, #9fe18d 0%, #67c28e 100%);
-  --sidebar-primary-hover:
-    linear-gradient(135deg, #b3e99d 0%, #78cf9b 100%);
-  --sidebar-primary-text: #12201a;
-  --sidebar-primary-border: rgba(189, 236, 198, 0.28);
-  --sidebar-radius: 1.15rem;
-  --sidebar-radius-inner: 0.9rem;
+  --text-main: #ffffff;
+  --display-font: 'Manrope', 'IBM Plex Sans', sans-serif;
 }
 
 * {
@@ -70,7 +28,7 @@ body,
 body {
   margin: 0;
   overflow: hidden;
-  background: #141516;
+  background: #1a1a1a;
 }
 
 button,
@@ -83,7 +41,7 @@ select {
 h1,
 h2,
 h3 {
-  font-family: 'Manrope', sans-serif;
+  font-family: var(--display-font);
   color: var(--text-main);
   letter-spacing: -0.035em;
 }

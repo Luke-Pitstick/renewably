@@ -220,3 +220,6 @@ src/python/ml/models/*.pkl
 /*.local
 
 /src/python/ml/data/geoJSON/*.geojson
+
+/renewably_exports
+/re
