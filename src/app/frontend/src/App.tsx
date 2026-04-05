@@ -80,6 +80,7 @@ const API_BASE_URL =
   'http://127.0.0.1:8000'
 const LOCATION_SUGGEST_URL =
   'https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/suggest'
+const REPOSITORY_URL = 'https://github.com/Luke-Pitstick/renewably'
 
 function isFiniteCoordinate(value: number) {
   return Number.isFinite(value)
@@ -140,6 +141,7 @@ function App() {
   const [powerLinesVisible, setPowerLinesVisible] = useState(false)
   const [optimizationPanelOpen, setOptimizationPanelOpen] = useState(false)
   const [layerMenuOpen, setLayerMenuOpen] = useState(false)
+  const [helpModalOpen, setHelpModalOpen] = useState(false)
   const [optimizationMode, setOptimizationMode] =
     useState<OptimizationMode>('cash')
   const [optimizationValue, setOptimizationValue] = useState('')
@@ -254,6 +256,24 @@ function App() {
       controller.abort()
     }
   }, [trimmedDeferredLocationQuery])
+
+  useEffect(() => {
+    if (!helpModalOpen) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setHelpModalOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [helpModalOpen])
 
   const submitLocationSearch = (queryOverride?: string) => {
     const query = (queryOverride ?? locationQuery).trim()
@@ -373,6 +393,35 @@ function App() {
                   <p>Renewable Optimization Studio</p>
                 </div>
               </div>
+
+              <a
+                className="map-project-link map-project-link-icon"
+                href={REPOSITORY_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open the Renewably GitHub repository"
+                title="GitHub repository"
+              >
+                <svg viewBox="0 0 24 24" role="presentation" aria-hidden="true">
+                  <path
+                    d="M12 2C6.48 2 2 6.58 2 12.22c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49 0-.24-.01-1.05-.02-1.9-2.78.62-3.37-1.2-3.37-1.2-.46-1.19-1.11-1.51-1.11-1.51-.91-.64.07-.63.07-.63 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.56-1.14-4.56-5.05 0-1.11.39-2.01 1.03-2.72-.1-.26-.45-1.32.1-2.75 0 0 .84-.28 2.75 1.04A9.36 9.36 0 0 1 12 6.82c.85 0 1.71.12 2.51.35 1.9-1.32 2.74-1.04 2.74-1.04.55 1.43.21 2.49.1 2.75.64.71 1.03 1.61 1.03 2.72 0 3.92-2.34 4.79-4.57 5.05.36.32.68.95.68 1.92 0 1.39-.01 2.5-.01 2.84 0 .27.18.59.69.49A10.24 10.24 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </a>
+
+              <button
+                type="button"
+                className="map-help-button"
+                onClick={() => setHelpModalOpen(true)}
+                aria-haspopup="dialog"
+                aria-expanded={helpModalOpen}
+                aria-controls="app-help-modal"
+                aria-label="How to use Renewably"
+                title="How to use Renewably"
+              >
+                <span aria-hidden="true">?</span>
+              </button>
             </div>
 
             <form
@@ -507,6 +556,87 @@ function App() {
               </button>
             </form>
           </div>
+
+          {helpModalOpen ? (
+            <div
+              className="app-help-modal-backdrop"
+              onClick={() => setHelpModalOpen(false)}
+            >
+              <div
+                id="app-help-modal"
+                className="map-overlay app-help-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="app-help-modal-title"
+                onClick={(event) => {
+                  event.stopPropagation()
+                }}
+              >
+                <div className="legend-header app-help-modal-header">
+                  <div>
+                    <p className="panel-label">Quick start</p>
+                    <h2 id="app-help-modal-title" className="app-help-modal-title">
+                      How to use Renewably
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="overlay-close-button"
+                    onClick={() => setHelpModalOpen(false)}
+                    aria-label="Close help dialog"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="app-help-modal-body">
+                  <div className="app-help-step">
+                    <span className="app-help-step-number">1</span>
+                    <div>
+                      <strong>Find a location</strong>
+                      <p>
+                        Search for a city, state, or address to move the map where
+                        you want to plan.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="app-help-step">
+                    <span className="app-help-step-number">2</span>
+                    <div>
+                      <strong>Choose your layers</strong>
+                      <p>
+                        Use the layers button in the lower left to show solar,
+                        wind, farms, terrain, and transmission context.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="app-help-step">
+                    <span className="app-help-step-number">3</span>
+                    <div>
+                      <strong>Select an area to optimize</strong>
+                      <p>
+                        Open Optimize in the lower right, draw a polygon on the
+                        map, and set either your budget or required power target.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="app-help-step">
+                    <span className="app-help-step-number">4</span>
+                    <div>
+                      <strong>Review and export results</strong>
+                      <p>
+                        Inspect the recommended sites, compare totals, and export
+                        the selected locations as GeoJSON when you are ready.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <ArcGISMap
             topographyVisible={topographyVisible}
