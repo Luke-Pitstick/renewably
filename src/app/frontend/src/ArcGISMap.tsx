@@ -1488,6 +1488,7 @@ export const ArcGISMap = memo(function ArcGISMap({
           map,
           center: LOWER_48_VIEW.center,
           zoom: LOWER_48_VIEW.zoom,
+          popupEnabled: false,
           constraints: {
             minZoom: 3,
             maxZoom: 11,
@@ -1683,33 +1684,6 @@ export const ArcGISMap = memo(function ArcGISMap({
       const isSolarSite = site.device_type === 'solar'
       const selectedOutput =
         isSolarSite ? site.solar_power_kwh : site.wind_power_kwh
-      const popupFieldInfos = [
-        {
-          fieldName: 'selectedOutputKwh',
-          label: isSolarSite
-            ? 'Solar output (kWh)'
-            : 'Wind output (kWh)',
-          format: { digitSeparator: true, places: 2 },
-        },
-        {
-          fieldName: 'expectedOutputKwh',
-          label: 'Probability-adjusted output (kWh)',
-          format: { digitSeparator: true, places: 2 },
-        },
-        {
-          fieldName: 'deviceCostUsd',
-          label: isSolarSite ? 'Solar device cost (USD)' : 'Wind device cost (USD)',
-          format: { digitSeparator: true, places: 2 },
-        },
-      ]
-
-      if (site.effective_cost_usd !== undefined) {
-        popupFieldInfos.push({
-          fieldName: 'effectiveCostUsd',
-          label: 'Effective cost (USD)',
-          format: { digitSeparator: true, places: 2 },
-        })
-      }
 
       const graphic = new coreModules.GraphicCtor({
         geometry: new coreModules.PointCtor({
@@ -1740,15 +1714,6 @@ export const ArcGISMap = memo(function ArcGISMap({
               : WIND_OPTIMIZATION_PIN_URL,
           width: '32px',
           height: '40px',
-        },
-        popupTemplate: {
-          title: '{deviceType} optimization site',
-          content: [
-            {
-              type: 'fields',
-              fieldInfos: popupFieldInfos,
-            },
-          ],
         },
       })
 
