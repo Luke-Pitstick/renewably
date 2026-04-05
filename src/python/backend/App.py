@@ -595,8 +595,8 @@ def _convert_solar_to_power_kwh(solar_values: np.ndarray) -> np.ndarray:
         ),
         otypes=[float],
     )
-    panel_hourly_output_kwh = converter(solar_values)
-    return panel_hourly_output_kwh / SERIES7_EQUIVALENT_POWER_KWAC
+    annual_panel_output_kwh = converter(solar_values)
+    return annual_panel_output_kwh / HOURS_PER_YEAR / SERIES7_EQUIVALENT_POWER_KWAC
 
 
 @lru_cache(maxsize=2048)
