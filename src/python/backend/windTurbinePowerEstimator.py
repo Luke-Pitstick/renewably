@@ -32,7 +32,7 @@ def estimate_aep_from_mean_speed(mean_speed_10m,
     power = np.array([simple_power_curve(x, rated_power=rated_power_kw) for x in v])
 
     avg_power_kw = np.trapezoid(power * pdf, v)
-    aep_kwh = avg_power_kw * 8760
+    aep_kwh = avg_power_kw 
 
     return {
         "mean_speed_hub_mps": mean_speed_hub,
